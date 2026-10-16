@@ -28,6 +28,7 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
 (async () => {
   // ---- snapshot ----
   const snapshot = await api("/api/config");
+  let laatstGeschrevenDoorTest = null;   // laatste door een test gezette PUT-body
   const state0 = await api("/api/state");
   console.log(`Pi: fase=${state0.state} kind=${state0.kind_mode} detector=${state0.detector}`);
   console.log(`snapshot genomen (${Object.keys(snapshot).length} top-level keys)`);
@@ -91,7 +92,10 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     });
     await test("opslaan persisteert naar de Pi", async () => {
       await page.waitForSelector("#savebar:not([hidden])", { timeout: 3000 }).catch(() => {});
+      const putP = page.waitForResponse(r => r.url().endsWith("/api/config") && r.request().method() === "PUT");
       await page.click("#btn-save");
+      const putRes = await putP;
+      laatstGeschrevenDoorTest = JSON.parse(putRes.request().postData());
       await page.waitForFunction(
         () => document.querySelector("#savebar")?.hidden === true,
         null, { timeout: 8000 });
@@ -170,7 +174,10 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
         throw new Error("geen dirty na wand-sleep");
     });
     await test("opslaan persisteert layout", async () => {
+      const putP2 = page.waitForResponse(r => r.url().endsWith("/api/config") && r.request().method() === "PUT");
       await page.click("#btn-save");
+      const putRes2 = await putP2;
+      laatstGeschrevenDoorTest = JSON.parse(putRes2.request().postData());
       await page.waitForFunction(
         () => document.querySelector("#savebar")?.hidden === true, null, { timeout: 8000 });
       const cfg = await api("/api/config");
@@ -212,11 +219,19 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     // ---- restore ----
     console.log("\n== restore naar snapshot ==");
     try {
-      const r = await fetch(BASE + "/api/config", {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(snapshot),
-      });
-      console.log("  config teruggezet:", r.status);
+      // alleen restoren als de config niet extern gewijzigd is
+      const nu = await api("/api/config");
+      const externGewijzigd = JSON.stringify(nu)
+        !== JSON.stringify(laatstGeschrevenDoorTest ?? snapshot);
+      if (externGewijzigd) {
+        console.log("  config is extern gewijzigd tijdens de run — NIET teruggedraaid");
+      } else {
+        const r = await fetch(BASE + "/api/config", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(snapshot),
+        });
+        console.log("  config teruggezet:", r.status);
+      }
       await api("/api/kind", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: state0.kind_mode }) });
       console.log("  kind_mode terug:", state0.kind_mode);
       await fetch(BASE + "/api/goto/rust", { method: "POST" });

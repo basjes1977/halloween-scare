@@ -191,7 +191,12 @@ function gelijk(a, b) {
 
 /** UI → config-object (servervorm). */
 function uiNaarConfig() {
-  const c = kloon(state.config);
+  // guard: vóór de eerste config-load is state.config nog null; kaarten
+  // bestaan dan al wel — klikken mogen dan niet crashen (race-fix)
+  const c = kloon(state.config ?? {});
+  c.screens = c.screens ?? { layout: { mode: "horizontal", swap: false },
+                             swap: false, offset: { dx: 0, dy: 0 },
+                             items: [{}, {}] };
 
   // schermen algemeen
   c.screens.layout = wandLeesLayout();
@@ -270,6 +275,44 @@ function uiNaarConfig() {
 
 function checkOpslaan() {
   zetDirty(!gelijk(uiNaarConfig(), state.config));
+  planAutoOpslaan();
+}
+
+let _autoOpslaanTimer = null;
+let _autoOpslaanBezig = false;
+let _referentieUi = null; // uiNaarConfig()-momentopname bij load/save (auto-save-referentie)
+
+/** Auto-opslaan: directe instellingen (rotatie, wand-indeling, overlay)
+   zijn zichtbaar-op-scherm-instellingen — die moeten zonder tussenkomst
+   van de Opslaan-knop doorgaan (gedebounce 600 ms). Formuliervelden die
+   grotere gevolgen hebben (fases, timing) blijven via de savebar lopen. */
+function planAutoOpslaan() {
+  if (_autoOpslaanTimer) clearTimeout(_autoOpslaanTimer);
+  _autoOpslaanTimer = setTimeout(async () => {
+    _autoOpslaanTimer = null;
+    if (_autoOpslaanBezig || !state.config) return;
+    const nu = uiNaarConfig();
+    if (gelijk(nu, state.config)) return;
+    if (!state.config || !_referentieUi) return;
+    // auto-save alléén als het verschil met de laatste bekende UI-toestand
+    // beperkt blijft tot het screens-blok (rotatie/wand/overlay/offsets);
+    // zit de wijziging ook elders (fases, timing) -> savebar-regime
+    const zs = (o) => { const c = kloon(o); delete c.screens; return c; };
+    if (!gelijk(zs(nu), zs(_referentieUi))) return;
+    _autoOpslaanBezig = true;
+    try {
+      const cfg = uiNaarConfig();
+      await putConfig(cfg);
+      state.config = cfg;
+      _referentieUi = kloon(cfg);
+      zetDirty(false);
+      toast("Automatisch opgeslagen");
+    } catch (e) {
+      toast("Auto-opslaan mislukt: " + e.message, "err");
+    } finally {
+      _autoOpslaanBezig = false;
+    }
+  }, 600);
 }
 
 /** Alle formuliervelden terugzetten vanuit state.config. */
@@ -1218,6 +1261,7 @@ function koppelEvents() {
       const cfg = uiNaarConfig();
       await putConfig(cfg);
       state.config = cfg;
+      _referentieUi = kloon(cfg);
       zetDirty(false);
       toast("Configuratie opgeslagen");
     } catch (e) {
@@ -1246,17 +1290,21 @@ function koppelEvents() {
 
 async function start() {
   koppelTabs();
-  bouwSchermKaarten();
   koppelEvents();
   koppelUpload();
   koppelVerwijder();
 
   try {
+    // EERST de config ophalen, DAARNA de kaarten bouwen: anders kan de
+    // gebruiker klikken op een UI waarvan de serverwaarden nog niet
+    // geladen zijn, en veegt configNaarUi() zijn wijzigingen weg (race)
     const [cfg, lib] = await Promise.all([getConfig(), getLibrary()]);
     state.config = cfg;
     state.library = lib.items || [];
+    bouwSchermKaarten();
     bouwFaseKaarten();
     configNaarUi();
+    _referentieUi = uiNaarConfig();   // auto-save-referentie na eerste load
     bouwBibliotheekTabel();
   } catch (e) {
     toonOffline(`config/library laden mislukt (${e.message})`);

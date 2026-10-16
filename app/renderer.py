@@ -636,108 +636,6 @@ class Renderer:
                 print(f"[renderer] v2-modus faalt, legacy-modus: {e}")
                 self.v2 = None
 
-    # ------------------------------------------------ v2: media-textures
-    def _v2_tex(self, mid, idx):
-        """Texture voor (media-id, frame-index), lazy geladen en gecached."""
-        key = (mid, idx)
-        tx = self._tex_cache.get(key)
-        if tx is not None:
-            return tx
-        paths = self._v2_frames(mid) if mid else None
-        path = paths[idx] if paths and 0 <= idx < len(paths) else None
-        if not path:
-            return self._black
-        try:
-            surf = pygame.image.load(path).convert(24)
-            tx = self.ctx.texture(
-                surf.get_size(), 3, pygame.image.tostring(surf, "RGB", True))
-            tx.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        except Exception as e:
-            print(f"[renderer] texture-fout {path}: {e}")
-            return self._black
-        self._tex_cache[key] = tx
-        return tx
-
-    def _v2_frames(self, mid):
-        """Frame-paden van bibliotheek-item (bron gezet door de app)."""
-        fn = getattr(self, "_v2_frames_fn", None)
-        return fn(mid) if fn else None
-
-    def set_v2_frames_source(self, fn):
-        """fn(media_id) -> lijst frame-padbestanden (of None). Met korte
-        TTL-cache: listdir/sort per frame-render is zonde van de CPU."""
-        self._v2_frames_fn = fn
-        self._paths_cache = {}      # mid -> (paden, timestamp)
-
-    def _v2_frames(self, mid):
-        fn = getattr(self, "_v2_frames_fn", None)
-        if fn is None:
-            return None
-        hit = self._paths_cache.get(mid)
-        now = time.time()
-        if hit and now - hit[1] < 1.0:
-            return hit[0]
-        paths = fn(mid)
-        self._paths_cache[mid] = (paths, now)
-        return paths
-
-    def _v2_evict(self, huidige_mids):
-        """Gooi textures van media die niet meer in de actieve set zitten."""
-        for key in [k for k in list(self._tex_cache) if k[0] not in huidige_mids]:
-            try:
-                self._tex_cache.pop(key).release()
-            except Exception:
-                self._tex_cache.pop(key, None)
-
-    def _font(self, size):
-        f = self._font_cache.get(size)
-        if f is None:
-            f = pygame.font.SysFont("dejavuserifbold", int(max(8, size)))
-            self._font_cache[size] = f
-        return f
-
-    def _bake_overlay_item(self, text, x, y, size, color, screen):
-        """Eén overlay-item -> (texture, vao). x,y = centrum in fracties van
-        het scherm (fysieke orientatie, dus zonder rotatie)."""
-        col = pygame.Color(color)
-        font = self._font(size)
-        surf = font.render(text, True, (col.r, col.g, col.b))
-        pad = max(6, int(size) // 5)
-        bg = pygame.Surface((surf.get_width() + 2 * pad,
-                             surf.get_height() + pad), pygame.SRCALPHA)
-        bg.blit(surf, (pad, pad // 2))
-        tex = self._surface_to_tex(bg)
-        w, h = bg.get_size()
-        wl = self.win_w // 2
-        cx = screen * wl + x * wl
-        cy = y * self.win_h
-        vao = self._quad_vao(cx - w // 2, cy - h // 2, w, h)
-        return tex, vao
-
-    def render_overlay(self, items):
-        """Teken overlay-items op volledige resolutie (na de upscale)."""
-        if self.ctx.screen is None:
-            return
-        for it in items:
-            key = (it.get("text", ""), round(it.get("x", .5), 4),
-                   round(it.get("y", .5), 4), int(it.get("size", 44)),
-                   it.get("color", "#ffffff"), int(it.get("screen", 0)))
-            hit = self._ovl_cache.get(key)
-            if hit is None:
-                if len(self._ovl_cache) > 64:      # cache begrenzen
-                    for k in list(self._ovl_cache)[:32]:
-                        t, v = self._ovl_cache.pop(k)
-                        try:
-                            t.release(); v.release()
-                        except Exception:
-                            pass
-                hit = self._bake_overlay_item(
-                    key[0], key[1], key[2], key[3], key[4], key[5])
-                self._ovl_cache[key] = hit
-            tex, vao = hit
-            tex.use(1)
-            vao.render(moderngl.TRIANGLES)
-
         # ---- Wan-videolus-modus (FLF2V-frames, sterkste realisme) ----
         # (in v2-modus overbodig: die gebruikt bibliotheek-media; scheelt
         #  ~70 MB GPU-geheugen en laadtijd op de Pi)
@@ -837,7 +735,105 @@ class Renderer:
             self.portrait = None
             print(f"[renderer] portret-modus uit: {e}")
 
-    # ------------------------------------------------------------ text
+    
+    # ------------------------------------------------ v2: media-textures
+    def _v2_tex(self, mid, idx):
+        """Texture voor (media-id, frame-index), lazy geladen en gecached."""
+        key = (mid, idx)
+        tx = self._tex_cache.get(key)
+        if tx is not None:
+            return tx
+        paths = self._v2_frames(mid) if mid else None
+        path = paths[idx] if paths and 0 <= idx < len(paths) else None
+        if not path:
+            return self._black
+        try:
+            surf = pygame.image.load(path).convert(24)
+            tx = self.ctx.texture(
+                surf.get_size(), 3, pygame.image.tostring(surf, "RGB", True))
+            tx.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        except Exception as e:
+            print(f"[renderer] texture-fout {path}: {e}")
+            return self._black
+        self._tex_cache[key] = tx
+        return tx
+
+    def set_v2_frames_source(self, fn):
+        """fn(media_id) -> lijst frame-padbestanden (of None). Met korte
+        TTL-cache: listdir/sort per frame-render is zonde van de CPU."""
+        self._v2_frames_fn = fn
+        self._paths_cache = {}      # mid -> (paden, timestamp)
+
+    def _v2_frames(self, mid):
+        fn = getattr(self, "_v2_frames_fn", None)
+        if fn is None:
+            return None
+        hit = self._paths_cache.get(mid)
+        now = time.time()
+        if hit and now - hit[1] < 1.0:
+            return hit[0]
+        paths = fn(mid)
+        self._paths_cache[mid] = (paths, now)
+        return paths
+
+    def _v2_evict(self, huidige_mids):
+        """Gooi textures van media die niet meer in de actieve set zitten."""
+        for key in [k for k in list(self._tex_cache) if k[0] not in huidige_mids]:
+            try:
+                self._tex_cache.pop(key).release()
+            except Exception:
+                self._tex_cache.pop(key, None)
+
+    def _font(self, size):
+        f = self._font_cache.get(size)
+        if f is None:
+            f = pygame.font.SysFont("dejavuserifbold", int(max(8, size)))
+            self._font_cache[size] = f
+        return f
+
+    def _bake_overlay_item(self, text, x, y, size, color, screen):
+        """Eén overlay-item -> (texture, vao). x,y = centrum in fracties van
+        het scherm (fysieke orientatie, dus zonder rotatie)."""
+        col = pygame.Color(color)
+        font = self._font(size)
+        surf = font.render(text, True, (col.r, col.g, col.b))
+        pad = max(6, int(size) // 5)
+        bg = pygame.Surface((surf.get_width() + 2 * pad,
+                             surf.get_height() + pad), pygame.SRCALPHA)
+        bg.blit(surf, (pad, pad // 2))
+        tex = self._surface_to_tex(bg)
+        w, h = bg.get_size()
+        wl = self.win_w // 2
+        cx = screen * wl + x * wl
+        cy = y * self.win_h
+        vao = self._quad_vao(cx - w // 2, cy - h // 2, w, h)
+        return tex, vao
+
+    def render_overlay(self, items):
+        """Teken overlay-items op volledige resolutie (na de upscale)."""
+        if self.ctx.screen is None:
+            return
+        for it in items:
+            key = (it.get("text", ""), round(it.get("x", .5), 4),
+                   round(it.get("y", .5), 4), int(it.get("size", 44)),
+                   it.get("color", "#ffffff"), int(it.get("screen", 0)))
+            hit = self._ovl_cache.get(key)
+            if hit is None:
+                if len(self._ovl_cache) > 64:      # cache begrenzen
+                    for k in list(self._ovl_cache)[:32]:
+                        t, v = self._ovl_cache.pop(k)
+                        try:
+                            t.release(); v.release()
+                        except Exception:
+                            pass
+                hit = self._bake_overlay_item(
+                    key[0], key[1], key[2], key[3], key[4], key[5])
+                self._ovl_cache[key] = hit
+            tex, vao = hit
+            tex.use(1)
+            vao.render(moderngl.TRIANGLES)
+
+# ------------------------------------------------------------ text
     def _surface_to_tex(self, surf):
         data = pygame.image.tostring(surf, "RGBA", True)
         tex = self.ctx.texture(surf.get_size(), 4, data)

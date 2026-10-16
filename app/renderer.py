@@ -337,6 +337,104 @@ void main(){
 }
 """
 
+# ---------------------------------------------------------------- v2: fase-machine-modus
+# Per-state media uit de bibliotheek, rotatie per scherm, wide-canvas met
+# bezel-compensatie, overlay-quads. Actief zodra Renderer met v2=... wordt
+# gemaakt; zonder die parameter gedraagt hij zich exact als voorheen.
+FS_V2 = """
+#version 140
+in vec2 v_uv;
+out vec4 o;
+
+uniform float u_time;
+uniform float u_flash;    // bliksemscherm
+uniform float u_dim;      // 0..1 dimmen (rust-effect)
+uniform float u_scare;    // 0..1 rode puls
+uniform float u_flick;    // 0..1 kaarslicht-flikker
+uniform float u_wide;     // 0 = split, 1 = doorlopend canvas
+uniform vec2  u_bezel;    // wide: overlap-x (fractie), offset-y
+uniform vec2  u_rot01;    // rotatie scherm0/scherm1 (radialen)
+uniform float u_fmix0;    // crossfade scherm0
+uniform float u_fmix1;    // crossfade scherm1
+uniform float u_fmixW;    // crossfade wide
+uniform sampler2D u_texA0;
+uniform sampler2D u_texB0;
+uniform sampler2D u_texA1;
+uniform sampler2D u_texB1;
+uniform sampler2D u_texAW;
+uniform sampler2D u_texBW;
+
+float hash21(vec2 p){
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+float vnoise(vec2 p){
+    vec2 i = floor(p); vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// lokale uv 0..1 (y omlaag) roteren rond het midden van het scherm
+vec2 rot_uv(vec2 l, float rot){
+    vec2 p = l - 0.5;
+    float c = cos(rot), s = sin(rot);
+    p = mat2(c, -s, s, c) * p;
+    return p + 0.5;
+}
+
+void main(){
+    float t = u_time;
+    float side = step(0.5, v_uv.x);            // 0 = scherm0 (links), 1 = scherm1
+    float su = fract(v_uv.x * 2.0);            // 0..1 binnen het scherm
+    float sv = v_uv.y;
+    float rot = mix(u_rot01.x, u_rot01.y, side);
+
+    vec2 l = rot_uv(vec2(su, sv), rot);
+    float inframe = step(abs(l.x - 0.5), 0.5) * step(abs(l.y - 0.5), 0.5);
+
+    vec3 col;
+    if (u_wide > 0.5){
+        // doorlopend canvas: texture-u loopt over beide schermen; de
+        // bezel-overlap trekt de helften in elkaar zodat de randen aansluiten
+        float ov = u_bezel.x;
+        float tu = mix(l.x * (0.5 + ov), (0.5 - ov) + l.x * (0.5 + ov), side);
+        float tv = clamp(l.y + u_bezel.y, 0.0, 1.0);
+        vec2 cuv = vec2(tu, tv);
+        vec3 a = texture(u_texAW, cuv).rgb;
+        vec3 b = texture(u_texBW, cuv).rgb;
+        col = mix(a, b, smoothstep(0.0, 1.0, u_fmixW)) * inframe;
+    } else {
+        // split: elk scherm zijn eigen frame-paar (volledige texture)
+        vec2 cuv = l;
+        vec3 a = mix(texture(u_texA0, cuv).rgb, texture(u_texB0, cuv).rgb,
+                     smoothstep(0.0, 1.0, u_fmix0));
+        vec3 b = mix(texture(u_texA1, cuv).rgb, texture(u_texB1, cuv).rgb,
+                     smoothstep(0.0, 1.0, u_fmix1));
+        col = mix(a, b, side) * inframe;
+    }
+
+    // leven: flikker + nevelslierten + vignette + korrel
+    float fl = mix(1.0, 0.90 + 0.10 * vnoise(vec2(t * 2.1 + side * 13.0, 3.7)), u_flick);
+    col *= fl;
+    float wisp = vnoise(vec2(su * 3.0 + t * 0.06 + side * 4.0, sv * 2.0 - t * 0.035));
+    col += vec3(0.018, 0.036, 0.024) * wisp * 0.5 * u_flick;
+    vec2 sq = vec2(su * 2.0 - 1.0, sv * 2.0 - 1.0);
+    float vig = smoothstep(1.62, 0.45, length(sq));
+    col *= mix(0.42, 1.0, vig);
+    if (u_scare > 0.5) col = mix(col, col * vec3(1.5, 0.55, 0.45), 0.5);
+    col *= mix(1.0, 0.55, u_dim);
+    col += (hash21(v_uv * vec2(3840.0, 1080.0) + fract(t) * 13.7) * 2.0 - 1.0)
+           * (0.012 + 0.10 * u_scare);
+    col = mix(col, vec3(1.0), clamp(u_flash, 0.0, 1.0) * 0.75);
+    o = vec4(col, 1.0);
+}
+"""
+
 STATE_IDX = {"SLEEP": 0, "RETURN": 1, "WAKING": 2, "AWAKE": 3,
              "TALKING": 4, "SCARE": 5, "LAUGH": 6}
 
@@ -470,7 +568,7 @@ ORB_DEMON = ("orb4", "orb5")
 
 
 class Renderer:
-    def __init__(self, win_size, require=310):
+    def __init__(self, win_size, require=310, v2=False):
         self.win_w, self.win_h = win_size
         if os.environ.get("GRIMORIA_EGL"):
             # headless-testmodus: offscreen EGL i.p.v. window-context
@@ -516,9 +614,135 @@ class Renderer:
         self._cap_h = 0
         self.t = 0.0
 
+        # ---- v2: fase-machine-modus (per-state bibliotheek-media) ----
+        self.v2 = None
+        self._tex_cache = {}        # (mid, idx) -> texture
+        self._font_cache = {}       # size -> Font
+        self._ovl_cache = {}        # sleutel -> (texture, vao)
+        self._black = self.ctx.texture((2, 2), 3, b"\x00\x00\x00" * 4)
+        self._black.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        if v2:
+            try:
+                self.prog2 = self.ctx.program(vertex_shader=VS_TRI,
+                                              fragment_shader=FS_V2)
+                self.vao2 = self.ctx.vertex_array(self.prog2, buf, "in_pos")
+                for uni, unit in (("u_texA0", 0), ("u_texB0", 1),
+                                  ("u_texA1", 2), ("u_texB1", 3),
+                                  ("u_texAW", 4), ("u_texBW", 5)):
+                    self.prog2[uni].value = unit
+                self.v2 = {"t0": time.time()}
+                print("[renderer] v2 fase-machine-modus AAN")
+            except Exception as e:
+                print(f"[renderer] v2-modus faalt, legacy-modus: {e}")
+                self.v2 = None
+
+    # ------------------------------------------------ v2: media-textures
+    def _v2_tex(self, mid, idx):
+        """Texture voor (media-id, frame-index), lazy geladen en gecached."""
+        key = (mid, idx)
+        tx = self._tex_cache.get(key)
+        if tx is not None:
+            return tx
+        paths = self._v2_frames(mid) if mid else None
+        path = paths[idx] if paths and 0 <= idx < len(paths) else None
+        if not path:
+            return self._black
+        try:
+            surf = pygame.image.load(path).convert(24)
+            tx = self.ctx.texture(
+                surf.get_size(), 3, pygame.image.tostring(surf, "RGB", True))
+            tx.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        except Exception as e:
+            print(f"[renderer] texture-fout {path}: {e}")
+            return self._black
+        self._tex_cache[key] = tx
+        return tx
+
+    def _v2_frames(self, mid):
+        """Frame-paden van bibliotheek-item (bron gezet door de app)."""
+        fn = getattr(self, "_v2_frames_fn", None)
+        return fn(mid) if fn else None
+
+    def set_v2_frames_source(self, fn):
+        """fn(media_id) -> lijst frame-padbestanden (of None). Met korte
+        TTL-cache: listdir/sort per frame-render is zonde van de CPU."""
+        self._v2_frames_fn = fn
+        self._paths_cache = {}      # mid -> (paden, timestamp)
+
+    def _v2_frames(self, mid):
+        fn = getattr(self, "_v2_frames_fn", None)
+        if fn is None:
+            return None
+        hit = self._paths_cache.get(mid)
+        now = time.time()
+        if hit and now - hit[1] < 1.0:
+            return hit[0]
+        paths = fn(mid)
+        self._paths_cache[mid] = (paths, now)
+        return paths
+
+    def _v2_evict(self, huidige_mids):
+        """Gooi textures van media die niet meer in de actieve set zitten."""
+        for key in [k for k in list(self._tex_cache) if k[0] not in huidige_mids]:
+            try:
+                self._tex_cache.pop(key).release()
+            except Exception:
+                self._tex_cache.pop(key, None)
+
+    def _font(self, size):
+        f = self._font_cache.get(size)
+        if f is None:
+            f = pygame.font.SysFont("dejavuserifbold", int(max(8, size)))
+            self._font_cache[size] = f
+        return f
+
+    def _bake_overlay_item(self, text, x, y, size, color, screen):
+        """Eén overlay-item -> (texture, vao). x,y = centrum in fracties van
+        het scherm (fysieke orientatie, dus zonder rotatie)."""
+        col = pygame.Color(color)
+        font = self._font(size)
+        surf = font.render(text, True, (col.r, col.g, col.b))
+        pad = max(6, int(size) // 5)
+        bg = pygame.Surface((surf.get_width() + 2 * pad,
+                             surf.get_height() + pad), pygame.SRCALPHA)
+        bg.blit(surf, (pad, pad // 2))
+        tex = self._surface_to_tex(bg)
+        w, h = bg.get_size()
+        wl = self.win_w // 2
+        cx = screen * wl + x * wl
+        cy = y * self.win_h
+        vao = self._quad_vao(cx - w // 2, cy - h // 2, w, h)
+        return tex, vao
+
+    def render_overlay(self, items):
+        """Teken overlay-items op volledige resolutie (na de upscale)."""
+        if self.ctx.screen is None:
+            return
+        for it in items:
+            key = (it.get("text", ""), round(it.get("x", .5), 4),
+                   round(it.get("y", .5), 4), int(it.get("size", 44)),
+                   it.get("color", "#ffffff"), int(it.get("screen", 0)))
+            hit = self._ovl_cache.get(key)
+            if hit is None:
+                if len(self._ovl_cache) > 64:      # cache begrenzen
+                    for k in list(self._ovl_cache)[:32]:
+                        t, v = self._ovl_cache.pop(k)
+                        try:
+                            t.release(); v.release()
+                        except Exception:
+                            pass
+                hit = self._bake_overlay_item(
+                    key[0], key[1], key[2], key[3], key[4], key[5])
+                self._ovl_cache[key] = hit
+            tex, vao = hit
+            tex.use(1)
+            vao.render(moderngl.TRIANGLES)
+
         # ---- Wan-videolus-modus (FLF2V-frames, sterkste realisme) ----
+        # (in v2-modus overbodig: die gebruikt bibliotheek-media; scheelt
+        #  ~70 MB GPU-geheugen en laadtijd op de Pi)
         self.video = None
-        if not os.environ.get("GRIMORIA_NO_VIDEO"):
+        if not v2 and not os.environ.get("GRIMORIA_NO_VIDEO"):
             try:
                 vdir = os.path.normpath(os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
@@ -562,7 +786,7 @@ class Renderer:
         # ---- fotorealistische portret-modus (FLUX-beelden, fallback) ----
         self.portrait = None
         try:
-            if self.video is not None:
+            if self.video is not None or v2:
                 raise RuntimeError("video-lusmodus actief, portret overgeslagen")
             pdir = os.path.normpath(os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "..", "media"))
@@ -694,7 +918,79 @@ class Renderer:
     # ------------------------------------------------------------ frame
     def render(self, grim):
         self.t += 1.0 / 30.0
-        self._render_scene(grim)
+        if self.v2 is not None and hasattr(grim, "v2_frame_info"):
+            self._render_v2(grim)
+        else:
+            self._render_scene(grim)
+
+    def _render_v2(self, grim):
+        """v2-pad: per-state bibliotheek-media, rotatie/wide per scherm."""
+        import math as _math
+        info = grim.v2_frame_info()          # mode/mids/effects/bezel/rot
+        scr = info.get("screens", {})
+        rot0 = _math.radians(float(scr.get("rot0", 0.0)))
+        rot1 = _math.radians(float(scr.get("rot1", 0.0)))
+        wide = 1.0 if info.get("mode") == "wide" else 0.0
+        bez = info.get("bezel", (0.0, 0.0))
+        fx = info.get("effects", {})
+        fps_v = float(info.get("fps", 16.0))
+
+        v = self.v2
+        if info.get("reset_t0"):
+            v["t0"] = time.time()
+        fr = (time.time() - v["t0"]) * fps_v
+
+        up = self.prog2
+        up["u_time"].value = self.t
+        up["u_flash"].value = float(grim.flash)
+        up["u_dim"].value = float(fx.get("dim", 0.0))
+        up["u_scare"].value = 1.0 if fx.get("scare") else 0.0
+        up["u_flick"].value = float(fx.get("flick", 1.0))
+        up["u_wide"].value = wide
+        up["u_bezel"].value = (float(bez[0]), float(bez[1]))
+        up["u_rot01"].value = (rot0, rot1)
+
+        def pair(mid, u_fmix_name, unit_a, unit_b):
+            paths = self._v2_frames(mid) if mid else None
+            n = len(paths) if paths else 0
+            if n == 0:
+                self._black.use(unit_a)
+                self._black.use(unit_b)
+                up[u_fmix_name].value = 0.0
+                return set()
+            loop = max(1, n - 1)
+            fi = int(fr) % loop
+            fj = (fi + 1) % loop
+            up[u_fmix_name].value = float(fr - int(fr))
+            self._v2_tex(mid, fi).use(unit_a)
+            self._v2_tex(mid, fj).use(unit_b)
+            return {mid}
+
+        nodig = set()
+        if wide > 0.5:
+            nodig |= pair(info.get("mids", {}).get("all"), "u_fmixW", 4, 5)
+            self._black.use(0); self._black.use(1)
+            self._black.use(2); self._black.use(3)
+            up["u_fmix0"].value = 0.0
+            up["u_fmix1"].value = 0.0
+        else:
+            mids = info.get("mids", {})
+            nodig |= pair(mids.get("0"), "u_fmix0", 0, 1)
+            nodig |= pair(mids.get("1"), "u_fmix1", 2, 3)
+            self._black.use(4); self._black.use(5)
+            up["u_fmixW"].value = 0.0
+        self._v2_evict(nodig)
+
+        # 1) scene naar half-res FBO
+        self.fbo.use()
+        self.vao2.render(moderngl.TRIANGLES)
+        # 2) upscale naar scherm
+        if self.ctx.screen is not None:
+            self.ctx.screen.use()
+            self.fbo_tex.use(0)
+            self.up_vao.render(moderngl.TRIANGLES)
+        # 3) overlay-items op volledige resolutie (fysieke orientatie)
+        self.render_overlay(info.get("overlay", []))
 
     def _render_scene(self, grim):
         st = STATE_IDX.get(grim.state, 0)

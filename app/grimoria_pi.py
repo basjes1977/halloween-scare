@@ -16,10 +16,53 @@ except ImportError:
     np = None
 
 BASE   = "/mnt/media/halloween"
-CFG    = json.load(open(f"{BASE}/app/config.json"))
+_CFG_PATH = f"{BASE}/app/config.json"
+import shutil
+
+def _load_cfg():
+    try:
+        return json.load(open(_CFG_PATH))
+    except Exception as e:
+        print(f"config-leesfout ({e}) — defaults")
+        return {}
+
+_CFG_RAW = _load_cfg()
+
+# v2-fase-machine: aan tenzij expliciet uit (env GRIMORIA_V2=0)
+V2 = os.environ.get("GRIMORIA_V2", "1") != "0"
+
+# v2: config normaliseren (schemas); bij fouten valt hij terug op defaults
+try:
+    from schemas import validate_config, DEFAULT_CONFIG
+    CFG, _cfg_fouten = validate_config(_CFG_RAW)
+    if _cfg_fouten:
+        print("config-waarschuwingen:", *_cfg_fouten, sep="\n  ")
+except Exception as _e:
+    print(f"schemas niet beschikbaar ({_e}) — legacy-config")
+    CFG = _CFG_RAW
+
+try:
+    from engine import Engine
+except Exception as _e:
+    print(f"engine niet beschikbaar ({_e}) — V2 uit")
+    Engine = None
+    V2 = False
+
+def _persist_cfg(cfg):
+    """Config atomair wegschrijven (webui PUT /api/config)."""
+    try:
+        tmp = _CFG_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        shutil.move(tmp, _CFG_PATH)
+    except Exception as e:
+        print(f"config-schrijffout: {e}")
+
 W, H   = 1920, 1080          # per scherm
 FULL   = (W * 2, H)          # één canvas over beide schermen
 RENDER_GL = CFG.get("render_gl", True)   # False = software-fallback
+if not RENDER_GL:
+    V2 = False
 FPS    = 30
 
 # ----------------------------------------------------------------voices
@@ -96,6 +139,39 @@ FALLBACK_FORTUNES = [
 events = queue.Queue()
 _last_state = {}
 
+# gedeelde camera-status (geschreven door cam_watcher, gelezen door main-loop)
+CAM = {"present": False, "last_seen": None, "conf": None}
+
+class _DetInfo:
+    backend = "onbekend"
+DET = _DetInfo()
+
+# v2-bibliotheek (filmframes); op een dev-machine zonder /mnt/media blijft
+# hij None en valt de renderer terug op de ingebouwde frame-series
+try:
+    from library import Library
+    LIB = Library(f"{BASE}/media/library")
+except Exception as _e:
+    print(f"bibliotheek niet beschikbaar ({_e})")
+    LIB = None
+
+def _v2_frames_source(mid):
+    """media-id -> frame-padlijst. 'builtin:rust'/'builtin:jump' gebruikt de
+    oorspronkelijke Wan-frame-series als er nog geen media is toegewezen."""
+    if not mid:
+        return None
+    if mid.startswith("builtin:"):
+        import glob as _glob
+        d = f"{BASE}/media/loops/frames/{mid.split(':', 1)[1]}"
+        hits = sorted(_glob.glob(os.path.join(d, "f*.png")))
+        return hits or None
+    if LIB is None:
+        return None
+    try:
+        return LIB.frames(mid) or None
+    except Exception:
+        return None
+
 # hergebruikte tekenbuffers (voorkomt gigabyte/s aan allocaties op de Pi)
 _SCRATCH: list = []
 
@@ -122,13 +198,15 @@ def ha_get(entity):
         return None
 
 def cam_watcher():
-    """Camera-bewegingsdetectie: trigger + blikrichting (lokaal, geen cloud)."""
+    """Camera-thread. v2: persoonsdetectie (TFLite, fallback frame-diff) +
+    bliktracking. Legacy: bewegingsdetectie zoals voorheen."""
     try:
         from picamera2 import Picamera2
     except Exception as e:
         log(f"picamera2 niet beschikbaar: {e}")
         return
     c = CFG.get("camera", {})
+    m = CFG.get("motion", {})
     W_, H_ = c.get("w", 320), c.get("h", 240)
     try:
         p = Picamera2()
@@ -143,10 +221,22 @@ def cam_watcher():
     motion_px = int(W_ * H_ * c.get("min_frac", 0.012))
     flip_x = c.get("flip_x", False)
     flip_y = c.get("flip_y", False)
+    detect_elk = max(1, int(round((c.get("fps", 8)) /
+                                  max(0.5, m.get("detect_fps", 3)))))
+    det = mem = None
+    if V2 and m.get("enabled", True):
+        try:
+            from detector import PersonDetector, PresentMemory
+            det = PersonDetector(CFG)
+            mem = PresentMemory(m.get("present_memory_secs", 1.0))
+            log(f"persoonsdetectie actief (backend={det.backend})")
+        except Exception as e:
+            log(f"detector-start faalt: {e} — frame-diff-blik alleen")
     prev = None
-    last_trig = 0
+    frame_n = 0
     last_track = 0
-    log(f"camera-motion actief ({W_}x{H_}, thr={thr}, min_px={motion_px})")
+    log(f"camera actief ({W_}x{H_}, thr={thr}, min_px={motion_px}, "
+        f"v2={bool(det)})")
     while True:
         try:
             req = p.capture_request()
@@ -156,6 +246,21 @@ def cam_watcher():
             log(f"cam-fout: {e}")
             time.sleep(2)
             continue
+        frame_n += 1
+        nu = time.time()
+        # ---- persoonsdetectie (v2) ----
+        if det is not None and frame_n % detect_elk == 0:
+            try:
+                d = det.detect(luma)
+                present = mem.update(d, nu)
+                if d.get("person"):
+                    CAM["last_seen"] = nu
+                    CAM["conf"] = d.get("conf")
+                CAM["present"] = present
+                DET.backend = det.backend
+            except Exception as e:
+                log(f"detect-fout: {e}")
+        # ---- bliktracking (frame-diff zwaartepunt; ook in v2) ----
         if prev is not None:
             mask = np.abs(luma - prev) > thr
             n = int(mask.sum())
@@ -165,13 +270,9 @@ def cam_watcher():
                 ny = float(ys.mean()) / H_ * 2 - 1
                 if flip_x: nx = -nx
                 if flip_y: ny = -ny
-                now = time.time()
-                if now - last_track > 0.5:
+                if nu - last_track > 0.5:
                     events.put(("CAM_TRACK", (nx, ny)))
-                    last_track = now
-                if now - last_trig > c.get("trig_cooldown", 90):
-                    events.put(("MOTION", None))
-                    last_trig = now
+                    last_track = nu
         prev = luma
         time.sleep(1.0 / c.get("fps", 8))
 
@@ -351,11 +452,16 @@ class Grimoria:
         if RENDER_GL:
             try:
                 from renderer import Renderer
-                self.gl = Renderer(FULL)
+                self.gl = Renderer(FULL, v2=V2)
                 log(f"GL-renderer actief: {self.gl.gl_version}")
+                if V2 and self.gl.v2 is not None:
+                    self.gl.set_v2_frames_source(_v2_frames_source)
             except Exception as e:
                 log(f"GL-renderer faalt, val terug op software: {e}")
                 self.gl = None
+        # v2-fase-machine-status (server_ctx wordt in main() gezet)
+        self.server_ctx = None
+        self._v2_sid = None
 
     def prefetcher(self):
         # haalt vooraf LLM-reacties op zodat een trigger instant voelt
@@ -375,9 +481,19 @@ class Grimoria:
     def say(self, text, caption=True):
         self.saying = text
         self.caption = text if caption else ""
+        self.cool["SPRAAK"] = time.time()     # spreek-cooldown-richtpunt
+        if V2:
+            # de engine bezit de state; alleen praten + onderschrift
+            try:
+                piper_wav(text, "/tmp/gsay.wav")
+                pygame.mixer.music.load("/tmp/gsay.wav")
+                pygame.mixer.music.play()
+                log(f"ZEGT: {text}")
+            except Exception as e:
+                log(f"TTS-fout: {e}")
+            return
         self.state = "TALKING"
         self.t0 = time.time()
-        self.cool["SPRAAK"] = time.time()     # spreek-cooldown-richtpunt
         try:
             piper_wav(text, "/tmp/gsay.wav")
             pygame.mixer.music.load("/tmp/gsay.wav")
@@ -476,6 +592,99 @@ class Grimoria:
             self.state = "SCARE"; self.t0 = time.time(); self.scare_frame = 0
             pygame.mixer.music.stop()
             sfx["scream"].play()
+
+    # ----------------v2: fase-machine-koppeling
+    def update_v2(self, dt, nu):
+        """Engine tikken + overgangen vertalen naar effecten; legacy-animatie-
+        onderdelen (blik, knipper, flash) gewoon bijhouden."""
+        ctx = self.server_ctx
+        if ctx is None:
+            return
+        eng = ctx.engine
+        try:
+            overgangen = eng.tick(nu, bool(CAM["present"]))
+        except Exception as e:
+            log(f"engine-tick-fout: {e}")
+            overgangen = []
+        for tr in overgangen:
+            log(f"fase: {tr['from']} -> {tr['to']} ({tr['reason']})")
+            st = next((s for s in CFG.get("states", [])
+                       if s["id"] == tr["to"]), {})
+            fx = st.get("effects", {})
+            if fx.get("scare"):
+                self.flash = 1.0
+                pygame.mixer.music.stop()
+                sfx["scream"].play()
+        # legacy-state benaderen zodat overige logica/captions kloppen
+        if eng.state_id == "jumpscare":
+            self.state = "SCARE"
+        elif self.caption:
+            self.state = "AWAKE"
+        else:
+            self.state = "SLEEP" if eng.state_id == "rust" else "AWAKE"
+        # camera-status doorgeven aan de server (/api/state)
+        ctx.person_present = bool(CAM["present"])
+        ctx.person_conf = CAM.get("conf")
+        ctx.person_last_seen = CAM.get("last_seen")
+        # ogen/knipper/flash (zelfde als legacy-tail)
+        if nu > self.idle_scan_next and nu - self.last_track > 3:
+            self.eye_target = (random.uniform(-.8, .8), random.uniform(-.4, .4))
+            self.idle_scan_next = nu + random.uniform(2, 6)
+        ex = self.eye_target[0] - self.eye[0]
+        ey = self.eye_target[1] - self.eye[1]
+        self.eye = (self.eye[0] + ex * min(1, dt * 3),
+                    self.eye[1] + ey * min(1, dt * 3))
+        self.blink -= dt
+        if self.blink < -3 and random.random() < 0.02:
+            self.blink = 0.18
+        self.glow_phase += dt
+        self.flash = max(0, self.flash - dt * 1.5)
+
+    def v2_frame_info(self):
+        """Alles wat de renderer per frame nodig heeft: media, rotatie,
+        wide/bezel, effecten en overlay-items (uit CFG)."""
+        eng = self.server_ctx.engine
+        sid = eng.state_id
+        reset = sid != self._v2_sid
+        self._v2_sid = sid
+        st = next((s for s in CFG.get("states", []) if s["id"] == sid), {})
+        mode = st.get("canvas_mode", "split")
+        media = st.get("media", {}) or {}
+        rust_id = "builtin:rust"
+        jump_id = "builtin:jump"
+        if mode == "wide":
+            mids = {"all": media.get("all") or rust_id}
+        else:
+            fb = jump_id if sid == "jumpscare" else rust_id
+            mids = {"0": media.get("0") or fb, "1": media.get("1") or fb}
+        scr = CFG.get("screens", {})
+        items = scr.get("items", []) or []
+        def _item(i):
+            return items[i] if i < len(items) else {}
+        overlay = []
+        for i in range(2):
+            ov = (_item(i).get("overlay") or {})
+            if ov.get("enabled") and ov.get("text"):
+                overlay.append({"text": ov["text"], "x": ov.get("x", 0.5),
+                                "y": ov.get("y", 0.85),
+                                "size": ov.get("size", 48),
+                                "color": ov.get("color", "#ffaa00"),
+                                "screen": i})
+        if self.caption:
+            overlay.append({"text": self.caption, "x": 0.5, "y": 0.9,
+                            "size": 44, "color": "#e1ebdc", "screen": 0})
+        return {
+            "mode": mode,
+            "mids": mids,
+            "effects": st.get("effects", {}),
+            "bezel": (st.get("bezel", {}).get("x", 0.0),
+                      st.get("bezel", {}).get("y", 0.0)),
+            "screens": {"rot0": _item(0).get("rotation", 0),
+                        "rot1": _item(1).get("rotation", 0)},
+            "fps": (CFG.get("playback", {}) or {}).get("fps", 16),
+            "reset_t0": reset,
+            "overlay": overlay,
+        }
 
     # ----------------update
     def update(self, dt):
@@ -758,6 +967,31 @@ def main():
     srv = None
     for poging in range(1, 31):
         try:
+            if V2:
+                from server import ServerContext, serve as serve_v2
+                ctx = ServerContext(webui_dir=f"{BASE}/app/webui",
+                                    media_dir=f"{BASE}/media")
+                ctx.engine = Engine(CFG, time.time())
+                ctx.library = LIB
+                ctx.detector = DET
+                ctx.get_cfg = lambda: CFG
+                ctx.persist_cfg = _persist_cfg
+                def _applied(c):
+                    CFG.update({k: v for k, v in c.items()
+                                if k in DEFAULT_CONFIG})
+                ctx.on_cfg_applied = _applied
+                # legacy-hooks (bel/say/scare via oude endpoints)
+                ctx.legacy = {
+                    "say": lambda d: events.put(("SAY", d.get("text", ""))),
+                    "wake": lambda: events.put(("DING", None)),
+                    "scare": lambda: events.put(("SCARE", None)),
+                    "mode": lambda d: None,     # kind via /api/kind
+                }
+                grim.server_ctx = ctx
+                srv = serve_v2(ctx, port)
+                log(f"v2-API + webui actief op :{port} "
+                    f"(engine-state: {ctx.engine.state_id})")
+                break
             srv = ThreadingHTTPServer(("0.0.0.0", port), API)
             break
         except OSError as e:
@@ -765,9 +999,10 @@ def main():
             time.sleep(2)
     if srv is None:
         log(f"poort {port} kon niet gebonden worden — API uit, animatie draait door")
-    else:
+    elif not V2:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-    log(f"Grimoria gestart (pid {os.getpid()}) — API op :{port}, HA-poll actief, GL={RENDER_GL}")
+    log(f"Grimoria gestart (pid {os.getpid()}) — API op :{port}, "
+        f"HA-poll actief, GL={RENDER_GL}, V2={V2}")
 
     # venster stabiliseren: herstel op t=1,3,7,15s en daarna elke 30s
     guard_momenten = [1, 3, 7, 15]
@@ -796,6 +1031,27 @@ def main():
         try:
             while True:
                 ev = events.get_nowait()
+                if V2:
+                    ctx = grim.server_ctx
+                    if ev[0] == "SAY":
+                        grim.say(ev[1])
+                    elif ev[0] == "SCARE":
+                        ok, msg = ctx.goto("jumpscare")
+                        if not ok:
+                            log(f"SCARE-knop: {msg}")
+                    elif ev[0] == "DING":
+                        ok, msg = ctx.goto("langzaam")
+                        log(f"DING (v2): naar langzaam ({msg})")
+                    elif ev[0] == "HOME":
+                        naam = {"bas": "Bas", "tanja": "Tanja",
+                                "kristel": "Kristel"}.get(ev[1], "")
+                        threading.Thread(
+                            target=grim.say,
+                            args=(f"Welkom thuis, {naam}… de nacht is jong.",),
+                            daemon=True).start()
+                    else:
+                        grim.handle(ev)      # CAM_TRACK: blik
+                    continue
                 if ev[0] == "SAY":
                     if grim.state in ("SLEEP", "RETURN"):
                         grim.state = "AWAKE"; grim.t0 = time.time()
@@ -807,7 +1063,10 @@ def main():
                     grim.handle(ev)
         except queue.Empty:
             pass
-        grim.update(dt)
+        if V2 and grim.server_ctx is not None:
+            grim.update_v2(dt, nu)
+        else:
+            grim.update(dt)
         grim.draw(screen)
 
 if __name__ == "__main__":

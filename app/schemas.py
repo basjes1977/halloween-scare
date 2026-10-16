@@ -23,6 +23,8 @@ States-model (v2, zie ontwerpdoc):
 
     { "id", "name", "loop", "canvas_mode": "split"|"wide",
       "media": {"0": "<lib-id>", "1": "<lib-id>"} | "<lib-id>" (wide),
+      "bezel": {"x": 0.0..0.5, "y": -0.5..0.5}   (alleen wide: rand-compensatie),
+      "effects": {"dim": 0..1, "scare": bool, "flick": 0..1},
       "advance": {
         "motion": {"to", "require_motion_secs"?, "kind_to"?, "cooldown"?,
                    "idle": {"to"?} }?,
@@ -80,6 +82,7 @@ DEFAULT_CONFIG: dict = {
             "loop": True,
             "canvas_mode": "split",
             "media": {"0": "", "1": ""},
+            "effects": {"dim": 0.35, "scare": False, "flick": 1.0},
             "advance": {
                 "motion": {"to": "langzaam", "cooldown": 90.0},
                 "timeout": None,
@@ -104,6 +107,7 @@ DEFAULT_CONFIG: dict = {
             "loop": False,
             "canvas_mode": "split",
             "media": {"0": "", "1": ""},
+            "effects": {"dim": 0.0, "scare": True, "flick": 1.0},
             "advance": {"timeout": {"secs": 2.5, "to": "kalm"}},
         },
         {
@@ -456,6 +460,26 @@ def _validate_states(states, errors: list,
         if not isinstance(loop, bool):
             loop = True
 
+        # bezel: alleen relevant voor wide; x = overlap-fractie die de helften
+        # in elkaar schuift, y = verticale offset van de texture
+        bez = st.get("bezel") or {}
+        clean_bezel = {"x": 0.0, "y": 0.0}
+        if isinstance(bez, dict):
+            if _is_num(bez.get("x")):
+                clean_bezel["x"] = _clamp(bez["x"], 0.0, 0.5)
+            if _is_num(bez.get("y")):
+                clean_bezel["y"] = _clamp(bez["y"], -0.5, 0.5)
+
+        # effects: dim/scare/flick — visuele post-processing per state
+        eff = st.get("effects") or {}
+        clean_effects = {"dim": 0.0, "scare": False, "flick": 1.0}
+        if isinstance(eff, dict):
+            if _is_num(eff.get("dim")):
+                clean_effects["dim"] = _clamp(eff["dim"], 0.0, 1.0)
+            clean_effects["scare"] = bool(eff.get("scare", False))
+            if _is_num(eff.get("flick")):
+                clean_effects["flick"] = _clamp(eff["flick"], 0.0, 1.0)
+
         adv_in = st.get("advance") or {}
         if not isinstance(adv_in, dict):
             errors.append(f"state {sid!r}: advance moet een object zijn — "
@@ -479,6 +503,8 @@ def _validate_states(states, errors: list,
             "loop": loop,
             "canvas_mode": cm,
             "media": _validate_media(st.get("media"), cm, sid, errors),
+            "bezel": clean_bezel,
+            "effects": clean_effects,
             "advance": advance,
         })
 

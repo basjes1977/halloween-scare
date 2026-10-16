@@ -157,7 +157,11 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     });
     await test("overlay-label grijpbaar op mobiel (touch)", async () => {
       await mob.fill("#ovl-tekst-0", "MOB");
-      await mob.locator('label:has(#ovl-aan-0) .track').click();
+      // toggle alleen aanzetten als hij nog uit staat (eerder tests kunnen
+      // hem al aangezet hebben)
+      if (!(await mob.locator("#ovl-aan-0").isChecked())) {
+        await mob.locator('label:has(#ovl-aan-0) .track').click();
+      }
       await mob.waitForSelector("#ovl-el-0:not([hidden])", { timeout: 3000 });
     });
     await mob.close();

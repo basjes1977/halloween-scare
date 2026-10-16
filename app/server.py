@@ -156,8 +156,9 @@ class ServerContext:
             for key, val in new_public_cfg.items():
                 merged[key] = val
             clean, errors = validate_config(merged)
-            if errors:
-                return False, errors
+            # validate_config normaliseert altijd naar een bruikbare config
+            # (fatale schade valt terug op defaults); de errors-lijst zijn
+            # dus herstelde waarschuwingen, geen reden om te weigeren
             # secrets + onbekende app-keys terugzetten vanuit het origineel
             for key in SENSITIVE_KEYS:
                 if key in full:

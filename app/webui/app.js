@@ -228,25 +228,40 @@ function uiNaarConfig() {
   for (const st of c.states || []) {
     st.canvas_mode = leesCanvasMode(st.id);
     st.media = st.media || {};
-    for (const k of ["0", "1", "wide"]) {
-      const sel = $(`media-${st.id}-${k}`);
-      if (sel) st.media[k] = sel.value || "";
+    // alleen de velden van de ACTIEVE canvas-modus meesturen; de andere
+    // keys opruimen zodat de round-trip schoon blijft
+    if (st.canvas_mode === "wide") {
+      const sel = $(`media-${st.id}-wide`);
+      st.media = sel ? { wide: sel.value || "" } : {};
+    } else {
+      st.media = {
+        "0": ($(`media-${st.id}-0`)?.value) || "",
+        "1": ($(`media-${st.id}-1`)?.value) || "",
+      };
     }
     const adv = st.advance = st.advance || {};
-    const m = adv.motion = adv.motion || {};
-    // motion-velden bestaan niet op elke fase-kaart (alleen waar relevant)
+    // motion-edge alleen als er een geldig doel is (kaarten zonder motion-
+    // velden mogen geen lege edge achterlaten)
     const toEl = $(`adv-to-${st.id}`);
-    if (toEl) m.to = toEl.value || null;
-    const rqEl = $(`adv-rq-${st.id}`);
-    if (rqEl && rqEl.value !== "") m.require_motion_secs = num(rqEl.value);
-    const cdEl = $(`adv-cd-${st.id}`);
-    if (cdEl && cdEl.value !== "") m.cooldown = num(cdEl.value);
+    const to = toEl ? (toEl.value || "") : "";
+    if (to) {
+      const m = { to };
+      const rqEl = $(`adv-rq-${st.id}`);
+      if (rqEl && rqEl.value !== "") m.require_motion_secs = num(rqEl.value);
+      const cdEl = $(`adv-cd-${st.id}`);
+      if (cdEl && cdEl.value !== "") m.cooldown = num(cdEl.value);
+      adv.motion = m;
+    } else {
+      delete adv.motion;
+    }
     const tsecs = $(`adv-tsecs-${st.id}`);
     const tto = $(`adv-tto-${st.id}`);
     if (tsecs && tto) {
-      adv.timeout = tsecs.value === "" && tto.value === ""
+      adv.timeout = tsecs.value === "" || tto.value === ""
         ? null
-        : { secs: tsecs.value === "" ? null : num(tsecs.value), to: tto.value || null };
+        : { secs: num(tsecs.value), to: tto.value };
+    } else if (adv.timeout === undefined) {
+      adv.timeout = null;
     }
   }
   return c;

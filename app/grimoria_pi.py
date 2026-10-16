@@ -686,6 +686,8 @@ class Grimoria:
                                 "y": ov.get("y", 0.85),
                                 "size": ov.get("size", 48),
                                 "color": ov.get("color", "#ffaa00"),
+                                "rotate": ov.get("rotate", "auto"),
+                                "scherm_rot": _item(i).get("rotation", 0),
                                 "screen": i})
         if self.caption:
             overlay.append({"text": self.caption, "x": 0.5, "y": 0.9,

@@ -809,12 +809,24 @@ class Renderer:
             self._font_cache[size] = f
         return f
 
-    def _bake_overlay_item(self, text, x, y, size, color, screen):
+    def _bake_overlay_item(self, text, x, y, size, color, screen,
+                           rotate="auto", scherm_rot=0):
         """Eén overlay-item -> (texture, vao). x,y = centrum in fracties van
-        het scherm (fysieke orientatie, dus zonder rotatie)."""
+        het scherm (fysieke orientatie). rotate='auto' laat de tekst met de
+        schermrotatie meedraaien (leesbaar in portret); een getal is een
+        eigen hoek (graden, t.o.v. het geroteerde beeld)."""
         col = pygame.Color(color)
         font = self._font(size)
         surf = font.render(text, True, (col.r, col.g, col.b))
+        if rotate == "auto":
+            hoek = int(scherm_rot) % 360
+        else:
+            try:
+                hoek = (int(rotate) + int(scherm_rot if rotate != "auto" else 0)) % 360
+            except (TypeError, ValueError):
+                hoek = int(scherm_rot) % 360
+        if hoek:
+            surf = pygame.transform.rotate(surf, -hoek)   # pygame: positief = rechtsom
         pad = max(6, int(size) // 5)
         bg = pygame.Surface((surf.get_width() + 2 * pad,
                              surf.get_height() + pad), pygame.SRCALPHA)
@@ -840,7 +852,8 @@ class Renderer:
         for it in items:
             key = (it.get("text", ""), round(it.get("x", .5), 4),
                    round(it.get("y", .5), 4), int(it.get("size", 44)),
-                   it.get("color", "#ffffff"), int(it.get("screen", 0)))
+                   it.get("color", "#ffffff"), int(it.get("screen", 0)),
+                   str(it.get("rotate", "auto")), int(it.get("scherm_rot", 0)))
             hit = self._ovl_cache.get(key)
             if hit is None:
                 if len(self._ovl_cache) > 64:      # cache begrenzen
@@ -851,7 +864,8 @@ class Renderer:
                         except Exception:
                             pass
                 hit = self._bake_overlay_item(
-                    key[0], key[1], key[2], key[3], key[4], key[5])
+                    key[0], key[1], key[2], key[3], key[4], key[5],
+                    key[6], key[7])
                 self._ovl_cache[key] = hit
             tex, vao = hit
             tex.use(1)

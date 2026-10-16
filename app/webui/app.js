@@ -234,6 +234,10 @@ function uiNaarConfig() {
     item.overlay.y = num($(`ovl-y-${i}`).value);
     item.overlay.size = num($(`ovl-size-${i}`).value, 48);
     item.overlay.color = $(`ovl-kleur-${i}`).value;
+    const meedraai = $(`ovl-meedraai-${i}`)?.checked ?? true;
+    item.overlay.rotate = meedraai
+      ? (num($(`ovl-hoek-${i}`).value, 0) || "auto")
+      : 0;
   }
 
   // algemeen
@@ -355,6 +359,14 @@ function configNaarUi() {
     $(`ovl-y-${i}`).value = num(ov.y, 0.85).toFixed(2);
     $(`ovl-size-${i}`).value = num(ov.size, 48);
     $(`ovl-kleur-${i}`).value = ov.color || "#ffaa00";
+    const r = ov.rotate;
+    const meedraai = !(typeof r === "number" && r === 0);
+    if ($(`ovl-meedraai-${i}`)) {
+      $(`ovl-meedraai-${i}`).checked = meedraai;
+      $(`ovl-hoek-veld-${i}`).hidden = meedraai && !((typeof r === "number") && r !== 0);
+      $(`ovl-hoek-veld-${i}`).hidden = !(meedraai && typeof r === "number");
+      $(`ovl-hoek-${i}`).value = (typeof r === "number") ? r : 0;
+    }
     updateOverlayEl(i);
     updateDndTekst(i);
   }
@@ -448,6 +460,14 @@ function bouwSchermKaarten() {
         <label class="field inline">y
           <input type="number" id="ovl-y-${i}" min="0" max="1" step="0.01" value="0.85">
         </label>
+      </div>
+      <div class="row">
+        <label class="switch" title="Tekst draait mee met de schermrotatie (leesbaar in portret)">
+          <input type="checkbox" id="ovl-meedraai-${i}" checked><span class="track"></span>Draait mee met scherm
+        </label>
+        <label class="field inline" id="ovl-hoek-veld-${i}" hidden>Eigen hoek
+          <input type="number" id="ovl-hoek-${i}" min="0" max="359" step="1" value="0"> °
+        </label>
       </div>`;
     grid.appendChild(kaart);
 
@@ -460,9 +480,18 @@ function bouwSchermKaarten() {
     });
 
     // overlay-formulier → preview
-    for (const id of [`ovl-aan-${i}`, `ovl-tekst-${i}`, `ovl-kleur-${i}`, `ovl-size-${i}`, `ovl-x-${i}`, `ovl-y-${i}`]) {
+    for (const id of [`ovl-aan-${i}`, `ovl-tekst-${i}`, `ovl-kleur-${i}`, `ovl-size-${i}`, `ovl-x-${i}`, `ovl-y-${i}`,
+                     `ovl-meedraai-${i}`, `ovl-hoek-${i}`]) {
       $(id).addEventListener("input", () => { updateOverlayEl(i); updateDndTekst(i); checkOpslaan(); });
     }
+    // hoekveld tonen/verbergen bij de meedraai-toggle
+    $(`ovl-meedraai-${i}`).addEventListener("change", () => {
+      const aan = $(`ovl-meedraai-${i}`).checked;
+      $(`ovl-hoek-veld-${i}`).hidden = !(aan && num($(`ovl-hoek-${i}`).value, 0) !== 0);
+    });
+    $(`ovl-hoek-${i}`).addEventListener("input", () => {
+      $(`ovl-hoek-veld-${i}`).hidden = false;
+    });
 
     koppelOverlayDrag(i);
     updateOverlayEl(i);
@@ -479,6 +508,7 @@ function zetRotatieUi(i, graden, ookWand = true) {
     btn.classList.toggle("active", num(btn.dataset.rot) === graden);
   }
   $(`prev-img-${i}`).style.transform = `rotate(${graden}deg)`;
+  if ($(`ovl-el-${i}`)) updateOverlayEl(i);   // overlay draait mee
   if (ookWand) wandZetRotatie(i, graden);
 }
 
@@ -876,6 +906,11 @@ function updateOverlayEl(i) {
   el.style.fontSize = `${num($(`ovl-size-${i}`).value, 48)}px`;
   el.style.left = `${num($(`ovl-x-${i}`).value, 0.5) * 100}%`;
   el.style.top = `${num($(`ovl-y-${i}`).value, 0.85) * 100}%`;
+  // meedraaien: totale hoek = schermrotatie (+ eigen hoek als die is gezet)
+  const meedraai = $(`ovl-meedraai-${i}`)?.checked ?? true;
+  const eigen = meedraai ? num($(`ovl-hoek-${i}`).value, 0) : 0;
+  const schermrot = meedraai ? num($(`rot-${i}`).dataset.val, 0) : 0;
+  el.style.transform = `translate(-50%, -50%) rotate(${(schermrot + eigen) % 360}deg)`;
 }
 
 /** x/y-statusregel onder de preview. */

@@ -50,12 +50,14 @@ DEFAULT_CONFIG: dict = {
             {
                 "rotation": 0,
                 "overlay": {"enabled": False, "text": "", "x": 0.5,
-                            "y": 0.85, "size": 48, "color": "#ffaa00"},
+                            "y": 0.85, "size": 48, "color": "#ffaa00",
+                            "rotate": "auto"},
             },
             {
                 "rotation": 0,
                 "overlay": {"enabled": False, "text": "", "x": 0.5,
-                            "y": 0.85, "size": 48, "color": "#ffaa00"},
+                            "y": 0.85, "size": 48, "color": "#ffaa00",
+                            "rotate": "auto"},
             },
         ],
     },
@@ -247,6 +249,16 @@ def _validate_screen_item(item, idx: int, errors: list) -> dict:
         t[key] = float(ov[key])
     _fix_num(ov, "size", t["size"], 6.0, 400.0)
     t["size"] = float(ov["size"])
+    rot = ov.get("rotate", "auto")
+    if isinstance(rot, bool):
+        # backwards compat: true = meedraaien, false = vast
+        t["rotate"] = "auto" if rot else 0
+    elif isinstance(rot, str) and rot == "auto":
+        t["rotate"] = "auto"
+    elif _is_num(rot):
+        t["rotate"] = int(rot) % 360
+    else:
+        t["rotate"] = "auto"
     col = ov.get("color", t["color"])
     if isinstance(col, str) and len(col) == 7 and col.startswith("#"):
         t["color"] = col.lower()

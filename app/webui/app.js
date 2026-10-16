@@ -508,6 +508,8 @@ function zetRotatieUi(i, graden, ookWand = true) {
     btn.classList.toggle("active", num(btn.dataset.rot) === graden);
   }
   $(`prev-img-${i}`).style.transform = `rotate(${graden}deg)`;
+  const prev = $(`prev-${i}`);
+  if (prev) prev.classList.toggle("portret", Math.abs(graden % 180) === 90);
   if ($(`ovl-el-${i}`)) updateOverlayEl(i);   // overlay draait mee
   if (ookWand) wandZetRotatie(i, graden);
 }
@@ -625,9 +627,11 @@ function wandVervers() {
       </span>`;
     canvas.appendChild(blok);
 
-    // mini-preview in het blok getrouw roteren
+    // mini-preview in het blok getrouw roteren; 90/270 -> blok wordt portret
+    const rot = [r0, r1][i];
     const img = blok.querySelector(".placeholder");
-    img.style.transform = `rotate(${[r0, r1][i]}deg)`;
+    img.style.transform = `rotate(${rot}deg)`;
+    blok.classList.toggle("portret", Math.abs(rot % 180) === 90);
 
     // rotatie-presets (actieve stand markeren)
     blok.querySelectorAll("button[data-wrot]").forEach((btn) => {
@@ -664,6 +668,7 @@ function wandZetRotatie(i, graden) {
   const blok = document.querySelector(`.wand-blok[data-scherm="${i}"]`);
   if (!blok) return;
   blok.querySelector(".placeholder").style.transform = `rotate(${graden}deg)`;
+  blok.classList.toggle("portret", Math.abs(graden % 180) === 90);
   blok.querySelector(".wand-rot").textContent = `${graden}°`;
   for (const btn of blok.querySelectorAll("button[data-wrot]")) {
     btn.classList.toggle("active", num(btn.dataset.wrot) === graden);

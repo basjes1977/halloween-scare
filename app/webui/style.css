@@ -301,6 +301,8 @@ label.radio, label.check {
   position: absolute;
   width: 34%;
   aspect-ratio: 16 / 9;
+  /* 90/270-rotatie: blok wordt fysiek portret (net als het echte scherm) */
+  transition: aspect-ratio .15s ease-out, width .15s ease-out;
   transform: translate(-50%, -50%);
   background: #000;
   border: 2px solid var(--border);
@@ -589,4 +591,19 @@ table.lib td.hint { padding: 14px 10px; }
 /* print/verkleinde root-font */
 @media (max-width: 400px) {
   html { font-size: 14px; }
+}
+
+/* portret-stand van een wand-blok: 90/270 graden rotatie */
+.wand-blok.portret {
+  width: 20%;
+  aspect-ratio: 9 / 16;
+}
+
+/* preview-portret (per-scherm kaart): 90/270 graden */
+.preview.portret {
+  aspect-ratio: 9 / 16;
+  max-width: 360px;
+}
+.preview.portret .placeholder {
+  object-fit: contain;   /* video vult, overlay-tekst blijft op zijn plek */
 }

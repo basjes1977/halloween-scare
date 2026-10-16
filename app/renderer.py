@@ -836,12 +836,26 @@ class Renderer:
         vert = getattr(self, "_layout_vert", False)
         swap = getattr(self, "_layout_swap", False)
         scr = (1 - screen) if swap else screen
+        # x,y zijn KIJKER-coordinaten (zoals de UI ze toont): eerst de
+        # schermrotatie ongedaan maken naar fysieke framebuffer-positie
+        import math as _m
+        rx, ry = x * 2 - 1, y * 2 - 1                    # -1..1, y omlaag
+        rad = -_m.radians(int(scherm_rot) % 360)
+        if rad:
+            # shader roteert het beeld +hoek tegen de klok in (uv-ruimte);
+            # fysieke positie = beeldpositie terug-geroteerd
+            cosr, sinr = _m.cos(rad), _m.sin(rad)
+            fx = rx * cosr + ry * sinr
+            fy = -rx * sinr + ry * cosr
+            rx, ry = fx, fy
+        px = (rx + 1) / 2                                 # 0..1 fysiek
+        py = (ry + 1) / 2
         if vert:
-            cx = x * self.win_w
-            cy = scr * self.win_h + y * (self.win_h // 2)
+            cx = px * self.win_w
+            cy = scr * self.win_h + py * (self.win_h // 2)
         else:
-            cx = scr * (self.win_w // 2) + x * (self.win_w // 2)
-            cy = y * self.win_h
+            cx = scr * (self.win_w // 2) + px * (self.win_w // 2)
+            cy = py * self.win_h
         vao = self._quad_vao(cx - w // 2, cy - h // 2, w, h)
         return tex, vao
 

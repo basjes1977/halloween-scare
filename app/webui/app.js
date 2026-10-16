@@ -125,22 +125,36 @@ async function pollOnce() {
   }
   if (state.online && st) {
     toonOnline();
-    $("st-phase").textContent = st.name || st.state || "—";
-    $("st-phase-id").textContent = st.state ? `(${st.state})` : "";
-    $("st-phase-time").textContent = `${fmt(num(st.since_secs), 1)} s`;
-    const p = st.person || {};
-    const el = $("st-person");
-    el.textContent = p.present
-      ? `aanwezig (${fmt(num(p.conf), 2)})`
-      : "geen";
-    el.classList.toggle("persoon-aan", !!p.present);
-    el.classList.toggle("persoon-uit", !p.present);
-    $("st-detector").textContent = st.detector || "—";
-    // kind-mode alleen overschrijven als de gebruiker er net niet op drukt
-    if (!kindBusy) $("sb-kind").checked = !!st.kind_mode;
+    state.laatsteState = st;
+    state.laatsteStateOp = performance.now();
+    zetStatusWeergave(st, 0);
   }
   schedulePoll();
 }
+
+/** Statusbalk-weergave zetten; verstreken ms wordt lokaal bijgeteld. */
+function zetStatusWeergave(st, extraMs) {
+  $("st-phase").textContent = st.name || st.state || "—";
+  $("st-phase-id").textContent = st.state ? `(${st.state})` : "";
+  $("st-phase-time").textContent = `${fmt(num(st.since_secs) + extraMs / 1000, 1)} s`;
+  const p = st.person || {};
+  const el = $("st-person");
+  el.textContent = p.present
+    ? `aanwezig (${fmt(num(p.conf), 2)})`
+    : "geen";
+  el.classList.toggle("persoon-aan", !!p.present);
+  el.classList.toggle("persoon-uit", !p.present);
+  $("st-detector").textContent = st.detector || "—";
+  if (!kindBusy) $("sb-kind").checked = !!st.kind_mode;
+}
+
+// vloeiende klok: tussen polls door loopt de tijd 4x/sec verder op
+setInterval(() => {
+  if (poll.stopped || !state.laatsteState || !state.laatsteStateOp) return;
+  const extra = performance.now() - state.laatsteStateOp;
+  if (extra > 10000) return;  // te lang geen poll: niets raden
+  zetStatusWeergave(state.laatsteState, extra);
+}, 250);
 
 /** Poll netjes afbreken: bij tab-sluit en bij permanente fout. */
 function stopPoll() {
@@ -154,7 +168,12 @@ if (document.visibilityState === "hidden") {
   // voor de volledigheid: als de tab al verborgen is bij start niet pollen
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") stopPoll();
+  if (document.visibilityState === "hidden") {
+    stopPoll();                     // achtergrondtab: niet onnodig pollen
+  } else {
+    poll.stopped = false;           // terug in beeld: direct herstarten
+    pollOnce();
+  }
 });
 
 function toonOnline() {

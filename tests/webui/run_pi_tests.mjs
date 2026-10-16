@@ -198,6 +198,33 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       if (!String(rot).includes("90")) throw new Error("rotatie niet gesynchroniseerd: " + rot);
     });
 
+    console.log("\n== 4c. live statusbalk ==");
+    await test("tijd in fase loopt live mee", async () => {
+      const leesT = () => page.locator("#st-phase-time").textContent();
+      const t1 = await leesT();
+      await page.waitForTimeout(2500);
+      const t2 = await leesT();
+      const p = (x) => parseFloat(String(x).replace(",", "."));
+      if (!(p(t2) - p(t1) >= 1.5)) throw new Error(`bevroren: ${t1} -> ${t2}`);
+    });
+    await test("poll herstart na tab-hidden/visible (regressie)", async () => {
+      await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await page.waitForTimeout(1500);
+      await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      const leesT = () => page.locator("#st-phase-time").textContent();
+      const p = (x) => parseFloat(String(x).replace(",", "."));
+      const t1 = await leesT();
+      await page.waitForTimeout(2500);
+      const t2 = await leesT();
+      if (!(p(t2) - p(t1) >= 1.5)) throw new Error(`poll gestopt na visible: ${t1} -> ${t2}`);
+    });
+
     console.log("\n== 5. mobiele viewport (390×844, echte Pi) ==");
     const mob = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await mob.goto(BASE + "/", { waitUntil: "networkidle" });

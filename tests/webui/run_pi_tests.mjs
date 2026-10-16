@@ -164,7 +164,8 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       const blok = page.locator('.wand-blok[data-scherm="1"]');
       const box = await blok.boundingBox();
       const canvas = await page.locator("#wand-canvas").boundingBox();
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      // grijp bovenin het blok: op het centrum liggen de snap-knoppen
+      await page.mouse.move(box.x + box.width / 2, box.y + 15);
       await page.mouse.down();
       await page.mouse.move(canvas.x + canvas.width * 0.15, canvas.y + canvas.height / 2, { steps: 10 });
       await page.mouse.up();

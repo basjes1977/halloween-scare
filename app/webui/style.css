@@ -758,3 +758,35 @@ input.fase-naam:focus { background: var(--bg2); border-color: var(--accent); out
 .preview.portret .placeholder {
   object-fit: contain;   /* video vult, overlay-tekst blijft op zijn plek */
 }
+
+/* ============================================================
+   Responsive-afwerking (ronde 4): mobiel eerst bruikbaar
+   ============================================================ */
+
+/* aanraakdoelen comfortabel (Apple-richtlijn ~44px, pragmatisch 40px) */
+@media (max-width: 700px) {
+  button, select, input[type="text"], input[type="number"] {
+    min-height: 40px;
+  }
+  /* velden in kaarten niet forceren inline: laat ze stapelen */
+  .card .row { flex-wrap: wrap; }
+  .field.inline { flex: 1 1 140px; min-width: 0; }
+  .field.inline input, .field.inline select { width: 100%; }
+  /* edge-regels in fase-kaarten: label boven, select eronder vol breed */
+  .edge-regel { flex-wrap: wrap; row-gap: 6px; }
+  .edge-regel select, .edge-regel input[type="number"] { flex: 1 1 120px; }
+  .edge-extra .field.inline { flex: 1 1 45%; }
+  /* bibliotheek-tabel: horizontaal scrollen i.p.v. fijnknijpen */
+  .card.tabel-wrap, .tabel-wrap { overflow-x: auto; }
+  table { min-width: 480px; }
+  /* statusbalk: detector verbergen op hele kleine schermen */
+}
+@media (max-width: 420px) {
+  #statusbar .status-item:nth-child(5) { display: none; }   /* Detector */
+  #statusbar { font-size: 13px; }
+}
+/* hint dat de horizontale fase-rij scrollbaar is */
+.states-grid[data-layout="horizontaal"] {
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}

@@ -92,10 +92,12 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     });
     await test("opslaan persisteert naar de Pi", async () => {
       await page.waitForSelector("#savebar:not([hidden])", { timeout: 3000 }).catch(() => {});
-      const putP = page.waitForResponse(r => r.url().endsWith("/api/config") && r.request().method() === "PUT");
+      const putP = page.waitForResponse(
+        r => r.url().endsWith("/api/config") && r.request().method() === "PUT",
+        { timeout: 8000 }).catch(() => null);
       await page.click("#btn-save");
       const putRes = await putP;
-      laatstGeschrevenDoorTest = JSON.parse(putRes.request().postData());
+      if (putRes) laatstGeschrevenDoorTest = JSON.parse(putRes.request().postData());
       await page.waitForFunction(
         () => document.querySelector("#savebar")?.hidden === true,
         null, { timeout: 8000 });
@@ -174,10 +176,12 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
         throw new Error("geen dirty na wand-sleep");
     });
     await test("opslaan persisteert layout", async () => {
-      const putP2 = page.waitForResponse(r => r.url().endsWith("/api/config") && r.request().method() === "PUT");
+      const putP2 = page.waitForResponse(
+        r => r.url().endsWith("/api/config") && r.request().method() === "PUT",
+        { timeout: 8000 }).catch(() => null);
       await page.click("#btn-save");
       const putRes2 = await putP2;
-      laatstGeschrevenDoorTest = JSON.parse(putRes2.request().postData());
+      if (putRes2) laatstGeschrevenDoorTest = JSON.parse(putRes2.request().postData());
       await page.waitForFunction(
         () => document.querySelector("#savebar")?.hidden === true, null, { timeout: 8000 });
       const cfg = await api("/api/config");

@@ -176,8 +176,11 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     await test("layout wijziging maakt dirty (via pijltjestoets, robuuster)", async () => {
       // toetsenbord-route vermijdt sticky-overlay problemen van de muis-sleep
       const blok = page.locator('.wand-blok[data-scherm="1"]');
-      await blok.focus();
-      await page.keyboard.press("ArrowLeft");   // scherm 2 naar links = swap
+      await blok.scrollIntoViewIfNeeded();
+      await page.evaluate(() => {
+        const el = document.querySelector('.wand-blok[data-scherm="1"]');
+        if (el) { el.focus(); el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })); }
+      });
       await page.waitForTimeout(300);
       if (await page.locator("#savebar").evaluate(e => e.hidden))
         throw new Error("geen dirty na wand-toets");
@@ -245,6 +248,32 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     let nieuweFaseId = null;
     await test("nieuwe fase aanmaken + naam + vertakking + opslaan", async () => {
       await page.locator("#states-grid .card").first().waitFor({ state: "visible", timeout: 8000 });
+      // server-kant opruimen is betrouwbaarder dan UI-clicks: als er rommel-
+      // states zijn (van eerdere runs), zet de server-config terug naar de
+      // defaults vóór de test begint
+      const cfgVoor = await api("/api/config");
+      if (cfgVoor.states.some(st => !["rust", "langzaam", "jumpscare", "kalm"].includes(st.id))) {
+        const herbouw = { ...cfgVoor, states: cfgVoor.states.filter(st =>
+          ["rust", "langzaam", "jumpscare", "kalm"].includes(st.id)) };
+        if (herbouw.states.length === 0) {
+          // alles weggevreten: defaults terugzetten via bekende 4
+          herbouw.states = [
+            { id: "rust", name: "Rust", loop: true, canvas_mode: "split", media: {"0":"","1":""}, advance: { motion: { to: "langzaam", cooldown: 90 } } },
+            { id: "langzaam", name: "Langzame beweging", loop: true, canvas_mode: "split", media: {"0":"","1":""}, advance: { motion: { to: "jumpscare", require_motion_secs: 3, kind_to: "kalm", idle: { to: "rust" } }, timeout: { secs: 20, to: "rust" } } },
+            { id: "jumpscare", name: "Jumpscare", loop: false, canvas_mode: "split", media: {"0":"","1":""}, advance: { timeout: { secs: 2.5, to: "kalm" } } },
+            { id: "kalm", name: "Kalmeren", loop: true, canvas_mode: "split", media: {"0":"","1":""}, advance: { timeout: { secs: 20, to: "rust" } } },
+          ];
+          herbouw.entry_state = "rust";
+        }
+        await fetch(BASE + "/api/config", { method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(herbouw) });
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector(".wand-blok", { timeout: 8000 });
+        await page.click('[role="tab"][data-tab="phases"]');
+        await page.locator("#states-grid .card").first().waitFor({ state: "visible" });
+        await page.waitForTimeout(500);
+      }
       await page.click("#fase-nieuw");
       await page.waitForTimeout(900);
       const kaart = page.locator("#states-grid .card").last();

@@ -147,4 +147,6 @@ Eén pagina, vanilla JS (geen build-chain):
 
 ## Status
 
-- 2026-10-16: ontwerp vastgesteld, baseline-commit (`d07a12e`), alle ontwerpvragen beantwoord (rotatie 270, persoonsdetectie direct, canvas-modi per fase, flow+defaults, UI op :8077, kind_mode behouden, vault-plek). Implementatie gestart: backend-kern, API-server en webui in parallel (sub-agents); integratie met grimoria_pi.py/renderer.py daarna centraal. Live dienst op de Pi nog onaangetast.
+- 2026-10-16: ontwerp vastgesteld, baseline-commit (`d07a12e`), alle ontwerpvragen beantwoord.
+- 2026-10-16: v2-kern + integratie gebouwd en getest (46 unit-tests, keten-rooktest door echte code, server end-to-end, webui 47 DOM-checks). Repo: github.com/basjes1977/halloween-scare (`main` @ `073d32a`). Nieuwe architectuur in bedrijf: engine/detector/library/server + v2-shader (rotatie, wide+bezel, overlay, per-state media); legacy-modus blijft beschikbaar via `GRIMORIA_V2=0`.
+- **Volgende stap: deploy naar de Pi5** — wacht op akkoord van Bas. Plan: backup op de Pi → code+webui kopiëren → (optioneel) tflite_runtime + SSD-MobileNet-model → herstart → verify via `/api/state` en journalctl; rollback = backup terugzetten + herstart. Live dienst tot dan toe onaangetast.

@@ -1,0 +1,76 @@
+{
+  "_leesme": "Voorbeeldconfiguratie voor Grimoria. Kopieer dit bestand naar app/config.json en pas aan. ha_token is een PLACEHOLDER: vul een langlopende Home Assistant-token in (Profiel > Beveiliging > Langdurige toegangstokens). Zonder geldige token werken camera, fase-machine en webinterface gewoon; alleen HA-triggers (deurbel, aanwezigheid) doen het dan niet. app/config.json bevat geheimen en staat in .gitignore — NOOIT committen of delen. De sleutels screens/playback/motion/timing/states vormen het config-model v2 (zie docs/ontwerp-grimoria-webinterface.md); ha_*, llm_*, voice, camera en api_port zijn de bestaande runtime-sleutels.",
+  "ha_url": "http://192.168.178.51:8123",
+  "ha_token": "ZET_HIER_JE_HA_TOKEN",
+  "ha_entities": {
+    "ding": "binary_sensor.aarlo_ding_deurbel",
+    "motion": "binary_sensor.aarlo_motion_deurbel",
+    "home_bas": "person.bas_rutjes",
+    "home_tanja": "person.tanja",
+    "home_kristel": "person.kristel"
+  },
+  "api_port": 8077,
+  "screens": {
+    "swap": false,
+    "offset": { "dx": 0.0, "dy": 0.0 },
+    "items": [
+      {
+        "rotation": 0,
+        "overlay": { "enabled": false, "text": "", "x": 0.5, "y": 0.85, "size": 48, "color": "#ffaa00" }
+      },
+      {
+        "rotation": 0,
+        "overlay": { "enabled": false, "text": "", "x": 0.5, "y": 0.85, "size": 48, "color": "#ffaa00" }
+      }
+    ]
+  },
+  "playback": { "fps": 16, "render_fps": 30, "crossfade": true },
+  "camera": {
+    "enabled": true,
+    "w": 320,
+    "h": 240,
+    "fps": 8,
+    "flip_x": false,
+    "flip_y": false
+  },
+  "motion": { "enabled": true, "diff_thr": 25, "min_frac": 0.012, "person_hold_secs": 3.0, "still_secs": 5.0 },
+  "timing": { "scare_cooldown": 90 },
+  "llm_url": "http://192.168.178.91:11434",
+  "llm_model": "Ornith-1.0-35B-GGUF:UD-Q4_K_S",
+  "voice": "ronnie",
+  "length_scale": 1.12,
+  "kind_mode": true,
+  "jumpscare_kans": 0.0,
+  "awake_secs": 75,
+  "states": [
+    {
+      "id": "rust",
+      "name": "Rust",
+      "loop": true,
+      "media": { "0": "", "1": "" },
+      "advance": { "motion": { "to": "langzaam", "cooldown": 90 }, "timeout": null }
+    },
+    {
+      "id": "langzaam",
+      "name": "Langzame beweging",
+      "loop": true,
+      "media": { "0": "", "1": "" },
+      "advance": { "motion": { "to": "jumpscare", "require_motion_secs": 3.0 }, "timeout": { "secs": 20, "to": "rust" } }
+    },
+    {
+      "id": "jumpscare",
+      "name": "Jumpscare",
+      "loop": false,
+      "media": { "0": "", "1": "" },
+      "advance": { "timeout": { "secs": 2.5, "to": "kalm" } }
+    },
+    {
+      "id": "kalm",
+      "name": "Kalmeren",
+      "loop": true,
+      "media": { "0": "", "1": "" },
+      "advance": { "timeout": { "secs": 20, "to": "rust" } }
+    }
+  ],
+  "entry_state": "rust"
+}

@@ -1,6 +1,6 @@
 # Grimoria webinterface en fase-machine — ontwerp
 
-> Status: concept v1 (2026-10-16) · Obsidian-kopie: `vault/_staging/2026-10-16-grimoria-web-interface-fases.md`
+> Status: concept v1 (2026-10-16) · Obsidian: `6 - Main Notes/Infrastructure/Architecture/Grimoria web interface en fase-machine.md` · repo: `halloween/docs/`
 
 ## Summary
 
@@ -12,7 +12,7 @@ Grimoria draait als systemd user-service (`grimoria`) op de Pi5 (192.168.178.85)
 
 - Eén randloos X11-venster 3840×1080 over beide HDMI-schermen; pygame + moderngl (GL 3.1, V3D); splitsing links (gezicht) / rechts (orb) is **hard gecodeerd** op `uv.x = 0.5`.
 - Video-lusmodus: geëxtraheerde frameseries (480×272 PNG, 16 fps bron, crossfade naar 30 fps render) uit `media/loops/frames/{rust,jump}` — 81 rust-frames, 98 jump-frames (palindroom).
-- Camera: picamera2, 320×240 @ 8 fps, bewegingsdetectie via luma-frame-diff (`diff_thr` 25, `min_frac` 1,2 %). Geen persoonsdetectie.
+- Camera: picamera2, 320×240 @ 8 fps, bewegingsdetectie via luma-frame-diff (`diff_thr` 25, `min_frac` 1,2 %). **Wordt vervangen door echte persoonsdetectie** (zie besluiten).
 - API op :8077: `GET /state`, `POST /say|/wake|/scare|/mode`. Geen CORS, geen statische bestanden, geen config-endpoints.
 - Fase-logica versnipperd over `update()`, `handle()`, `say()` en de main-loop in `grimoria_pi.py`; state-tijden en cooldowns hardcoded.
 - Config: `app/config.json` (bevat **HA-token — gevoelig**), geladen bij start; `config_pi.json` identieke kopie.
@@ -25,8 +25,9 @@ Van een hardcoded demo naar een **configureerbaar platform**: states (fases) met
 
 1. **Per scherm**: rotatie 0/90/180/270 (arbitraire graden ondersteund in het model), overlay-tekst aan/uit met drag&drop-positie.
 2. **Schermen onderling**: rol-wissel (welk scherm toont welke "canvas-positie") plus instelbare offset/scale.
-3. **Filmbibliotheek**: mp4-upload via de webinterface; ffmpeg op de Pi extraheert frames (480×272, 16 fps) naar `media/library/<id>/frames/`.
-4. **Per fase per scherm een loop-filmpje** instellen (keuze uit bibliotheek).
+3. **Filmbibliotheek**: mp4-upload via de webinterface; ffmpeg op de Pi extraheert frames (480×272, 16 fps) naar `media/library/<id>/frames/`; breed-canvas media (3840×1080) wordt apart gemarkeerd.
+4. **Per fase per scherm een loop-filmpje** instellen (keuze uit bibliotheek) **of één breed canvas-filmpje over beide schermen** (instelbaar per fase, `canvas_mode: split | wide`).
+5. **Persoonsdetectie direct vanaf het begin**: TFLite-model (MobileNet-SSD) op de Pi5, ~2–5 fps; "persoon aanwezig" is het centrale triggersignaal (met ~1 s geheugen). Luma-frame-diff blijft als fallback als het model niet laadt.
 5. **Fase-machine** (configureerbare tijden, defaults tussen haakjes):
 
 ```text
@@ -49,6 +50,7 @@ rust ──beweging──▶ langzaam ──beweging houdt aan (3 s)──▶ ju
 
 | Bestand | Rol |
 |---|---|
+| `detector.py` (nieuw) | Persoonsdetectie-backend: TFLite MobileNet-SSD op picamera2-frames; levert `person_present` + positie; frame-diff als fallback. |
 | `engine.py` (nieuw) | Pure fase-machine: states, overgangen, timers, cooldowns. Geen GL/pygame — unit-testbaar op elke machine. |
 | `compositor.py` (nieuw) | Per-scherm rendering: rotatie-transform, overlay-tekstquads, offset/scale. |
 | `library.py` (nieuw) | Filmbibliotheek: upload, ffmpeg-extractie, metadata (`library.json`), verwijderen. |
@@ -70,22 +72,25 @@ rust ──beweging──▶ langzaam ──beweging houdt aan (3 s)──▶ ju
     ]
   },
   "playback": { "fps": 16, "render_fps": 30, "crossfade": true },
-  "motion":   { "enabled": true, "diff_thr": 25, "min_frac": 0.012,
-                "person_hold_secs": 3.0, "still_secs": 5.0 },
+  "motion":   { "enabled": true, "detector": "tflite",
+                "model": "ssd_mobilenet_v2.tflite", "detect_fps": 3,
+                "person_conf": 0.5, "person_hold_secs": 3.0,
+                "present_memory_secs": 1.0, "still_secs": 5.0,
+                "fallback_frame_diff": true },
   "timing":   { "scare_cooldown": 90 },
   "kind_mode": true,
   "states": [
-    { "id": "rust", "name": "Rust", "loop": true,
+    { "id": "rust", "name": "Rust", "loop": true, "canvas_mode": "split",
       "media": { "0": "<bibliotheek-id>", "1": "<bibliotheek-id>" },
       "advance": { "motion": { "to": "langzaam", "cooldown": 90 }, "timeout": null } },
-    { "id": "langzaam", "name": "Langzame beweging", "loop": true,
+    { "id": "langzaam", "name": "Langzame beweging", "loop": true, "canvas_mode": "split",
       "media": { "0": "<id>", "1": "<id>" },
       "advance": { "motion": { "to": "jumpscare", "require_motion_secs": 3.0 },
                    "timeout": { "secs": 20, "to": "rust" } } },
-    { "id": "jumpscare", "name": "Jumpscare", "loop": false,
+    { "id": "jumpscare", "name": "Jumpscare", "loop": false, "canvas_mode": "split",
       "media": { "0": "<id>", "1": "<id>" },
       "advance": { "timeout": { "secs": 2.5, "to": "kalm" } } },
-    { "id": "kalm", "name": "Kalmeren", "loop": true,
+    { "id": "kalm", "name": "Kalmeren", "loop": true, "canvas_mode": "split",
       "media": { "0": "<id>", "1": "<id>" },
       "advance": { "timeout": { "secs": 20, "to": "rust" } } }
   ],
@@ -100,7 +105,7 @@ Dit model is al de **generieke ketenvorm** voor v2: een keten is een getriggerde
 | Endpoint | Methode | Functie |
 |---|---|---|
 | `/` en `/webui/*` | GET | Statische webinterface |
-| `/api/state` | GET | `{state, name, since_secs, motion:{last_seen, active}, kind_mode}` (1 Hz poll door UI) |
+| `/api/state` | GET | `{state, name, since_secs, person:{present, last_seen, conf}, detector, kind_mode}` (1 Hz poll door UI) |
 | `/api/config` | GET/PUT | Config lezen/schrijven (validatie + hot-apply waar mogelijk; **filtert `ha_token`**) |
 | `/api/library` | GET | Bibliotheeklijst `{id, name, frames, fps, duration, created}` |
 | `/api/library` | POST | mp4-upload (multipart) → ffmpeg-extractie |
@@ -119,13 +124,14 @@ Eén pagina, vanilla JS (geen build-chain):
 
 ## Besluiten (vastgelegd 2026-10-16)
 
-1. Rotatie: 0/90/180/270 als primaire presets; het model ondersteunt arbitraire graden (170° mogelijk, met zwarte hoeken).
-2. "Persoon gedetecteerd" = **aanhoudende beweging** (v1). Echte persoonsdetectie is v2-optie; interface (`motion.active`) verandert niet.
-3. Screens-positie: rol-wissel + offset/scale; per-scherm-filmpjes blijven leidend (geen doorlopende 3840-px-video in v1).
-4. UI op :8077, LAN-only, geen authenticatie. Geen secrets in UI of API-responses.
-5. `kind_mode` blijft bestaan als toggle.
-6. Defaults: hold 3 s, scare 2,5 s, kalm 20 s, cooldown 90 s, still 5 s — in de UI aanpasbaar.
+1. Rotatie: 0/90/180/270 als primaire presets (bevestigd; "170" was een typfout); het model ondersteunt arbitraire graden als uitzondering.
+2. **Persoonsdetectie echt, direct vanaf het begin** (gekozen boven "aanhoudende beweging"): TFLite MobileNet-SSD, ~3 fps, confidence-drempel instelbaar; frame-diff alleen als fallback. Bijlage: modelbestand (~4–7 MB) via deploy geïnstalleerd; check op AI-accelerator (Hailo) tijdens implementatie.
+3. Screens-positie: **(c) beide modi, per fase instelbaar** — `canvas_mode: "split"` (losse filmpjes per scherm, standaard) of `"wide"` (één 3840×1080-filmpje over beide schermen, met instelbare overlap/offset voor de bezel). Bibliotheek markeert media als breed; UI biedt alleen geldige combinaties aan.
+4. Fase-flow bevestigd incl. betekenis per filmpje; defaults hold 3 s / scare 2,5 s / kalm 20 s / cooldown 90 s / weg-na-5 s — **allemaal in de UI instelbaar** (expliciete acceptatie-eis).
+5. UI op :8077, LAN-only, geen authenticatie (gekozen: optie a). Geen secrets in UI of API-responses.
+6. `kind_mode` blijft bestaan als toggle in de UI (bevestigd). Bij aan: automatische overgang *langzaam → jumpscare* wordt overgeslagen en de keten loopt door naar *kalm*; handmatige test via testknop/`/api/goto` blijft altijd mogelijk.
 7. GitHub-publicatie: aparte repo; **`config.json`/`config_pi.json`/`token/`/`data/`/screenshots uitgesloten** via `.gitignore`; `config.example.json` met placeholder-token. Licentie: MIT (tenzij anders gewenst).
+8. Vault-locatie bevestigd: deze notitie in `6 - Main Notes/Infrastructure/Architecture/` (met frontmatter); repo-kopie in `halloween/docs/`.
 
 ## Beveiliging
 
@@ -141,4 +147,4 @@ Eén pagina, vanilla JS (geen build-chain):
 
 ## Status
 
-- 2026-10-16: ontwerp vastgesteld, baseline-commit, implementatie gestart (backend engine/API en webui parallel). Live dienst op de Pi nog onaangetast.
+- 2026-10-16: ontwerp vastgesteld, baseline-commit (`d07a12e`), alle ontwerpvragen beantwoord (rotatie 270, persoonsdetectie direct, canvas-modi per fase, flow+defaults, UI op :8077, kind_mode behouden, vault-plek). Implementatie gestart: backend-kern, API-server en webui in parallel (sub-agents); integratie met grimoria_pi.py/renderer.py daarna centraal. Live dienst op de Pi nog onaangetast.

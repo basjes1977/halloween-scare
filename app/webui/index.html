@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Grimoria — bediening</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l1 6 5-3-2.5 5.5L21 12l-5.5 1.5L18 19l-5-2.5L12 22l-1-5.5L6 19l2.5-5.5L3 12l5.5-1.5L6 5l5 3z' fill='%23ff7a1a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ============ statusbalk (pollt /api/state elke seconde) ============ -->
+  <header id="statusbar">
+    <span class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2l1 6 5-3-2.5 5.5L21 12l-5.5 1.5L18 19l-5-2.5L12 22l-1-5.5L6 19l2.5-5.5L3 12l5.5-1.5L6 5l5 3z" fill="#ff7a1a"/>
+      </svg>
+      GRIMORIA
+    </span>
+    <span class="status-item">Fase: <strong id="st-phase">—</strong> <span class="mini" id="st-phase-id"></span></span>
+    <span class="status-item">In fase: <strong id="st-phase-time">—</strong></span>
+    <span class="status-item">Persoon: <strong id="st-person" class="persoon-uit">—</strong></span>
+    <span class="status-item">Detector: <strong id="st-detector">—</strong></span>
+    <label class="switch" title="Kind-modus: de keten slaat de jumpscare over">
+      <input type="checkbox" id="sb-kind"><span class="track"></span>Kind-modus
+    </label>
+    <span id="st-conn" class="conn conn-err">verbinden…</span>
+  </header>
+
+  <!-- ============ offline-banner (zichtbaar bij API-fout) ============ -->
+  <div id="offline-banner" class="banner" hidden>
+    <strong>Geen verbinding met de Grimoria-API.</strong>
+    <span class="hint" id="offline-detail"></span>
+    <button id="btn-retry" class="btn" type="button">Opnieuw proberen</button>
+  </div>
+
+  <!-- ============ tabs ============ -->
+  <nav id="tabs" role="tablist" aria-label="Instellingen">
+    <button role="tab" type="button" data-tab="screens" class="active" aria-selected="true">Schermen</button>
+    <button role="tab" type="button" data-tab="phases" aria-selected="false">Fases</button>
+    <button role="tab" type="button" data-tab="library" aria-selected="false">Bibliotheek</button>
+  </nav>
+
+  <main>
+
+    <!-- ============ TAB 1: SCHERMEN ============ -->
+    <section class="tabpanel" id="tab-screens" role="tabpanel" aria-label="Schermen">
+      <!-- per-scherm kaarten worden door app.js gevuld -->
+      <div class="screens-grid" id="screens-grid"></div>
+
+      <!-- globale scherm-instellingen -->
+      <fieldset class="card">
+        <legend>Schermen algemeen</legend>
+        <div class="row">
+          <label class="switch" title="Wisselt de rol van scherm 0 en scherm 1">
+            <input type="checkbox" id="scr-swap"><span class="track"></span>Schermen wisselen (swap)
+          </label>
+        </div>
+        <div class="row offset-rij">
+          <label class="field inline">
+            Offset dx <span class="mini" id="val-scr-dx">0,000</span>
+            <input type="number" id="scr-dx" min="-0.5" max="0.5" step="0.01" value="0">
+          </label>
+          <label class="field inline">
+            Offset dy <span class="mini" id="val-scr-dy">0,000</span>
+            <input type="number" id="scr-dy" min="-0.5" max="0.5" step="0.01" value="0">
+          </label>
+        </div>
+      </fieldset>
+    </section>
+
+    <!-- ============ TAB 2: FASES ============ -->
+    <section class="tabpanel" id="tab-phases" role="tabpanel" aria-label="Fases" hidden>
+
+      <!-- algemene fase-instellingen -->
+      <fieldset class="card">
+        <legend>Algemeen</legend>
+        <div class="row">
+          <label class="field inline">Startfase (entry_state)
+            <select id="ph-entry"></select>
+          </label>
+          <label class="switch" title="Kind-modus: overgang naar de jumpscare wordt overgeslagen">
+            <input type="checkbox" id="ph-kind"><span class="track"></span>Kind-modus
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- bewegings- en timing-instellingen (globaal) -->
+      <fieldset class="card">
+        <legend>Beweging &amp; timing (algemeen)</legend>
+        <div class="row timing-rij">
+          <label class="field inline">Persoon vasthouden (person_hold_secs)
+            <input type="number" id="tim-hold" min="0" step="0.5">
+          </label>
+          <label class="field inline">Stil-drempel (still_secs)
+            <input type="number" id="tim-still" min="0" step="0.5">
+          </label>
+          <label class="field inline">Scare-cooldown (s)
+            <input type="number" id="tim-cooldown" min="0" step="1">
+          </label>
+          <label class="field inline">Detect-fps
+            <input type="number" id="tim-fps" min="1" max="30" step="1">
+          </label>
+          <label class="field inline">Persoon-confidentie
+            <input type="number" id="tim-conf" min="0" max="1" step="0.05">
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- per-fase kaarten worden door app.js gevuld -->
+      <div class="states-grid" id="states-grid"></div>
+    </section>
+
+    <!-- ============ TAB 3: BIBLIOTHEEK ============ -->
+    <section class="tabpanel" id="tab-library" role="tabpanel" aria-label="Bibliotheek" hidden>
+
+      <div class="card">
+        <div id="dropzone" role="button" tabindex="0"
+             aria-label="Sleep hier een videobestand naartoe of klik om te kiezen">
+          <strong>Film uploaden</strong><br>
+          Klik hier of sleep een bestand (.mp4 / .webm / .mkv, max 200 MB) naar dit vlak.
+        </div>
+        <input type="file" id="file-input" accept=".mp4,.webm,.mkv,video/mp4,video/webm,video/x-matroska" hidden>
+        <div class="row upload-rij">
+          <label class="switch" title="Aan voor breed-canvas films (3840×1080 over beide schermen)">
+            <input type="checkbox" id="up-wide"><span class="track"></span>Breed canvas (wide)
+          </label>
+        </div>
+        <div id="uprog" hidden>
+          <span id="uprog-txt">Uploaden…</span>
+          <div id="uprog-track"><div id="uprog-bar"></div></div>
+        </div>
+        <p class="hint" id="lib-hint">
+          Na uploaden extraheert de Pi automatisch frames (480×272, 16&nbsp;fps).
+          Dit kan even duren; de film verschijnt vanzelf in de lijst.
+        </p>
+      </div>
+
+      <div class="card">
+        <table class="lib">
+          <thead>
+            <tr><th>Naam</th><th>Type</th><th>Resolutie</th><th>Frames</th><th>Duur</th><th>Aangemaakt</th><th></th></tr>
+          </thead>
+          <tbody id="lib-tbody">
+            <tr><td colspan="7" class="hint">Laden…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ savebalk (zichtbaar zodra er iets is gewijzigd) ============ -->
+  <div id="savebar" hidden>
+    <span class="dirty-dot" aria-hidden="true"></span>
+    <span>Wijzigingen niet opgeslagen</span>
+    <button class="btn" id="btn-revert" type="button">Ongedaan maken</button>
+    <button class="btn btn-primary" id="btn-save" type="button">Opslaan</button>
+  </div>
+
+  <!-- ============ toasts ============ -->
+  <div id="toasts" aria-live="polite"></div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

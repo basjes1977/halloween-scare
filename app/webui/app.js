@@ -313,7 +313,8 @@ function planAutoOpslaan() {
   if (_autoOpslaanTimer) clearTimeout(_autoOpslaanTimer);
   _autoOpslaanTimer = setTimeout(async () => {
     _autoOpslaanTimer = null;
-    if (_autoOpslaanBezig || !state.config) return;
+    if (_autoOpslaanBezig) { planAutoOpslaan(); return; }  // opnieuw inplannen
+    if (!state.config || !_referentieUi) return;
     const nu = uiNaarConfig();
     if (gelijk(nu, state.config)) return;
     if (!state.config || !_referentieUi) return;

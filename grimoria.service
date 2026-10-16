@@ -1,0 +1,19 @@
+[Unit]
+Description=Madame Grimoria — Halloween spiegelgeest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+Environment=SDL_AUDIODRIVER=pulse
+WorkingDirectory=/mnt/media/halloween/app
+ExecStartPre=/bin/sh -c 'until [ -e /run/user/1000/pulse/native ]; do sleep 2; done'
+ExecStart=/usr/bin/python3 /mnt/media/halloween/app/grimoria_pi.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

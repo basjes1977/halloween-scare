@@ -1,0 +1,26 @@
+# secrets — NOOIT committen
+app/config.json
+app/config_pi.json
+config.json
+config_pi.json
+token/
+*.token
+
+# lokale data/logs
+data/
+*.log
+*.pid
+
+# gegenereerde media (groot)
+media/loops/frames/
+app/shots_gl/
+shots_gl/
+vidcheck/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# overig
+*.bak-*

@@ -1,0 +1,16 @@
+{
+  "1": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "clip_vision_h.safetensors"}},
+  "2": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan2.1_flf2v_720p_14B_fp8_e4m3fn.safetensors", "weight_dtype": "fp8_e4m3fn"}},
+  "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+  "4": {"class_type": "VAELoader", "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+  "5": {"class_type": "LoadImage", "inputs": {"image": "grimoria_stare_00001_.png"}},
+  "6": {"class_type": "LoadImage", "inputs": {"image": "grimoria_scream_00001_.png"}},
+  "7": {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["1", 0], "image": ["5", 0], "crop": "center"}},
+  "8": {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["1", 0], "image": ["6", 0], "crop": "center"}},
+  "9": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": "The eerie skull-faced fortune teller suddenly lunges toward the camera screaming in terrifying rage, her calm stare transforms into a horrifying wide-open screaming mouth, glowing eyes flare bright, violent fast jerky motion, smoke bursts, dark horror atmosphere, dramatic cinematic lighting, high detail"}},
+  "10": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"}},
+  "11": {"class_type": "WanFirstLastFrameToVideo", "inputs": {"positive": ["9", 0], "negative": ["10", 0], "vae": ["4", 0], "clip_vision_start_image": ["7", 0], "clip_vision_end_image": ["8", 0], "start_image": ["5", 0], "end_image": ["6", 0], "width": 960, "height": 544, "length": 49, "batch_size": 1}},
+  "12": {"class_type": "KSampler", "inputs": {"model": ["2", 0], "positive": ["11", 0], "negative": ["11", 1], "latent_image": ["11", 2], "seed": 20261017, "steps": 20, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+  "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+  "14": {"class_type": "SaveAnimatedWEBP", "inputs": {"images": ["13", 0], "filename_prefix": "grimoria_loop_jumpscare_raw", "fps": 16, "lossless": false, "quality": 90, "method": "default"}}
+}

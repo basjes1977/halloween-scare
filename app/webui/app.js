@@ -298,45 +298,6 @@ function uiNaarConfig() {
 
 function checkOpslaan() {
   zetDirty(!gelijk(uiNaarConfig(), state.config));
-  planAutoOpslaan();
-}
-
-let _autoOpslaanTimer = null;
-let _autoOpslaanBezig = false;
-let _referentieUi = null; // uiNaarConfig()-momentopname bij load/save (auto-save-referentie)
-
-/** Auto-opslaan: directe instellingen (rotatie, wand-indeling, overlay)
-   zijn zichtbaar-op-scherm-instellingen — die moeten zonder tussenkomst
-   van de Opslaan-knop doorgaan (gedebounce 600 ms). Formuliervelden die
-   grotere gevolgen hebben (fases, timing) blijven via de savebar lopen. */
-function planAutoOpslaan() {
-  if (_autoOpslaanTimer) clearTimeout(_autoOpslaanTimer);
-  _autoOpslaanTimer = setTimeout(async () => {
-    _autoOpslaanTimer = null;
-    if (_autoOpslaanBezig) { planAutoOpslaan(); return; }  // opnieuw inplannen
-    if (!state.config || !_referentieUi) return;
-    const nu = uiNaarConfig();
-    if (gelijk(nu, state.config)) return;
-    if (!state.config || !_referentieUi) return;
-    // auto-save alléén als het verschil met de laatste bekende UI-toestand
-    // beperkt blijft tot het screens-blok (rotatie/wand/overlay/offsets);
-    // zit de wijziging ook elders (fases, timing) -> savebar-regime
-    const zs = (o) => { const c = kloon(o); delete c.screens; return c; };
-    if (!gelijk(zs(nu), zs(_referentieUi))) return;
-    _autoOpslaanBezig = true;
-    try {
-      const cfg = uiNaarConfig();
-      await putConfig(cfg);
-      state.config = cfg;
-      _referentieUi = kloon(cfg);
-      zetDirty(false);
-      toast("Automatisch opgeslagen");
-    } catch (e) {
-      toast("Auto-opslaan mislukt: " + e.message, "err");
-    } finally {
-      _autoOpslaanBezig = false;
-    }
-  }, 600);
 }
 
 /** Alle formuliervelden terugzetten vanuit state.config. */
@@ -411,8 +372,8 @@ function configNaarUi() {
  * ============================================================ */
 
 const PREVIEWS = {
-  "0": { file: "../media/loops/frames/rust/f0021.png", tekst: "placeholder rust (scherm 0 — gezicht)" },
-  "1": { file: "../media/loops/frames/jump/f0031.png", tekst: "placeholder jump (scherm 1 — orb)" },
+  "0": { file: "../media/loops/frames/rust/f0021.png", tekst: "placeholder rust (Scherm 1 — gezicht)" },
+  "1": { file: "../media/loops/frames/jump/f0031.png", tekst: "placeholder jump (Scherm 2 — orb)" },
 };
 
 /** Bouw de twee scherm-kaarten (één keer bij start). */
@@ -424,7 +385,7 @@ function bouwSchermKaarten() {
     const kaart = document.createElement("fieldset");
     kaart.className = "card";
     kaart.innerHTML = `
-      <legend>Scherm ${i}</legend>
+      <legend>Scherm ${i + 1}</legend>
       <div class="row">
         <span class="field inline">Rotatie
           <span class="rot-groep" id="rot-${i}" data-val="0">
@@ -1041,10 +1002,10 @@ function bouwFaseKaarten() {
         <button type="button" class="btn btn-klein" data-goto="${esc(st.id)}" title="Zet de machine direct in deze fase">▶ naar deze fase</button>
       </div>
       <div class="fase-media-rij">
-        <label class="field inline">Film scherm 0
+        <label class="field inline">Film Scherm 1
           <select id="media-${esc(st.id)}-0">${mediaOpties("split", med["0"])}</select>
         </label>
-        <label class="field inline">Film scherm 1
+        <label class="field inline">Film Scherm 2
           <select id="media-${esc(st.id)}-1">${mediaOpties("split", med["1"])}</select>
         </label>
         <label class="field inline" id="media-wide-rij-${esc(st.id)}" hidden>Breed-canvas film
@@ -1283,10 +1244,6 @@ async function wisselKindMode(aan) {
   try {
     await postKind(aan);
     if (state.config) state.config.kind_mode = aan; // lokaal gelijk houden
-    // auto-save-referentie bijwerken: kind zit buiten screens en zou
-    // anders elke latere screens-auto-save blokkeren
-    if (typeof _referentieUi !== "undefined" && _referentieUi)
-      _referentieUi.kind_mode = aan;
     toast(`Kind-modus ${aan ? "aan" : "uit"}`);
     checkOpslaan();
   } catch (e) {
@@ -1325,7 +1282,6 @@ function koppelEvents() {
       const cfg = uiNaarConfig();
       await putConfig(cfg);
       state.config = cfg;
-      _referentieUi = kloon(cfg);
       zetDirty(false);
       toast("Configuratie opgeslagen");
     } catch (e) {
@@ -1368,7 +1324,6 @@ async function start() {
     bouwSchermKaarten();
     bouwFaseKaarten();
     configNaarUi();
-    _referentieUi = uiNaarConfig();   // auto-save-referentie na eerste load
     bouwBibliotheekTabel();
   } catch (e) {
     toonOffline(`config/library laden mislukt (${e.message})`);

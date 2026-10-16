@@ -92,6 +92,7 @@ const deleteLib = (id) => api(`/api/library/${encodeURIComponent(id)}`, { method
 const state = {
   config: null,      // laatst geladen/opgeslagen config (servervorm)
   library: [],       // bibliotheek-items
+  libraryBuiltin: [],// ingebouwde lussen (kiesbaar als pseudo-media)
   online: false,     // laatste poll-resultaat
 };
 
@@ -953,10 +954,23 @@ function mediaOpties(canvasMode, geselecteerd) {
   }
   items = items.slice().sort((a, b) => a.name.localeCompare(b.name, "nl"));
   let html = `<option value="">— geen —</option>`;
-  for (const it of items) {
-    const sel = it.id === geselecteerd ? " selected" : "";
-    const res = it.width && it.height ? ` (${it.width}×${it.height})` : "";
-    html += `<option value="${esc(it.id)}"${sel}>${esc(it.name)}${res}</option>`;
+  const builtins = (state.libraryBuiltin || []).filter((it) => !!it.wide === wiltWide);
+  if (builtins.length) {
+    html += `<optgroup label="Ingebouwd">`;
+    for (const it of builtins) {
+      const sel = it.id === geselecteerd ? " selected" : "";
+      html += `<option value="${esc(it.id)}"${sel}>${esc(it.name)}</option>`;
+    }
+    html += `</optgroup>`;
+  }
+  if (items.length) {
+    html += `<optgroup label="Bibliotheek">`;
+    for (const it of items) {
+      const sel = it.id === geselecteerd ? " selected" : "";
+      const res = it.width && it.height ? ` (${it.width}×${it.height})` : "";
+      html += `<option value="${esc(it.id)}"${sel}>${esc(it.name)}${res}</option>`;
+    }
+    html += `</optgroup>`;
   }
   return html;
 }
@@ -1588,6 +1602,20 @@ function vulStateDropdowns() {
   }
 }
 
+/** Media-dropdowns van alle fase-kaarten verversen (na import/upload),
+ *  huidige selectie behoudend. */
+function verversMediaDropdowns() {
+  for (const id of faseIdsVanUi()) {
+    for (const key of ["0", "1", "wide"]) {
+      const sel = $(`media-${id}-${key}`);
+      if (!sel) continue;
+      const cur = sel.value;
+      sel.innerHTML = mediaOpties(key === "wide" ? "wide" : "split", cur);
+      sel.value = cur;   // behoud (kan nu in Ingebouwd- of Bibliotheek-groep zitten)
+    }
+  }
+}
+
 /* ---------- keten-schema (read-only visualisatie) ---------- */
 
 /**
@@ -1652,6 +1680,12 @@ function tekenKetenSchema() {
 
 function bouwBibliotheekTabel() {
   const tb = $("lib-tbody");
+  const imp = $("lib-import");
+  if (imp) {
+    imp.innerHTML = (state.libraryBuiltin || []).map((b) =>
+      `<button type="button" class="btn btn-klein" data-import-builtin="${esc(b.id)}">⬇ ${esc(b.name.replace(" (ingebouwd)", ""))} importeren</button>`
+    ).join(" ");
+  }
   if (!state.library.length) {
     tb.innerHTML = `<tr><td colspan="7" class="hint">Nog geen films in de bibliotheek.</td></tr>`;
     return;
@@ -1685,6 +1719,30 @@ async function laadBibliotheek() {
     }
   }
   checkOpslaan();
+}
+
+function koppelImport() {
+  const rij = $("lib-import");
+  if (!rij) return;
+  rij.addEventListener("click", async (e) => {
+    const knop = e.target.closest("[data-import-builtin]");
+    if (!knop) return;
+    knop.disabled = true;
+    try {
+      const r = await api("/api/library/import/" + encodeURIComponent(knop.dataset.importBuiltin), { method: "POST" });
+      if (!r.ok) throw new Error(r.error || "import mislukt");
+      toast(`Geïmporteerd: ${r.item.name}`);
+      const lib = await getLibrary();
+      state.library = lib.items || [];
+      state.libraryBuiltin = lib.builtin || state.libraryBuiltin;
+      bouwBibliotheekTabel();
+      verversMediaDropdowns();
+    } catch (err) {
+      toast("Importeren mislukt: " + err.message, "err");
+    } finally {
+      knop.disabled = false;
+    }
+  });
 }
 
 function koppelUpload() {
@@ -1874,6 +1932,7 @@ async function start() {
   koppelEvents();
   koppelUpload();
   koppelVerwijder();
+  koppelImport();
 
   try {
     // EERST de config ophalen, DAARNA de kaarten bouwen: anders kan de
@@ -1882,6 +1941,7 @@ async function start() {
     const [cfg, lib] = await Promise.all([getConfig(), getLibrary()]);
     state.config = cfg;
     state.library = lib.items || [];
+    state.libraryBuiltin = lib.builtin || [];
     bouwSchermKaarten();
     bouwFaseKaarten();
     configNaarUi();

@@ -332,6 +332,45 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       const attr = await page.locator("#states-grid").evaluate(e => e.dataset.layout || e.className);
       if (!/horizont/i.test(String(attr))) throw new Error("layout: " + attr);
     });
+    console.log("\n== 4e. ingebouwde lussen ==");
+    await test("fase-dropdowns: Ingebouwd-groep (2 opties)", async () => {
+      await page.click('[role="tab"][data-tab="phases"]');
+      await page.waitForTimeout(300);
+      const opt = page.locator('select[id^="media-rust-0"] optgroup[label="Ingebouwd"] option');
+      await opt.first().waitFor({ state: "attached", timeout: 6000 });
+      if ((await opt.count()) !== 2) throw new Error("aantal builtin-opties");
+    });
+    await test("builtin kiezen + opslaan (builtin:rust)", async () => {
+      await page.locator('select[id^="media-rust-0"]').selectOption("builtin:rust");
+      await page.waitForTimeout(250);
+      await page.waitForSelector("#btn-save:not([disabled])", { timeout: 6000 });
+      await page.click("#btn-save");
+      await page.waitForFunction(() => document.querySelector("#savebar")?.hidden === true, null, { timeout: 12000 });
+      const cfg = await api("/api/config");
+      if (cfg.states.find(st => st.id === "rust").media["0"] !== "builtin:rust")
+        throw new Error("niet opgeslagen");
+    });
+    await test("import-knop: builtin -> bibliotheek + dropdowns ververst", async () => {
+      await page.click('[role="tab"][data-tab="library"]');
+      const knop = page.locator('[data-import-builtin="builtin:rust"]');
+      await knop.waitFor({ state: "visible" });
+      await knop.click();
+      await page.waitForTimeout(2500);
+      const lib = await api("/api/library");
+      const item = lib.items.find(i => i.source === "builtin");
+      if (!item || item.frames < 80) throw new Error("niet geïmporteerd");
+      await page.click('[role="tab"][data-tab="phases"]');
+      const opt = page.locator('select[id^="media-rust-0"] optgroup[label="Bibliotheek"] option');
+      await opt.first().waitFor({ state: "attached", timeout: 6000 });
+      // opruimen: geïmporteerde items weer weg + rust-media terug op geen
+      await fetch(BASE + "/api/library/" + item.id, { method: "DELETE" });
+      await page.locator('select[id^="media-rust-0"]').selectOption("");
+      await page.waitForTimeout(250);
+      await page.waitForSelector("#btn-save:not([disabled])", { timeout: 6000 });
+      await page.click("#btn-save");
+      await page.waitForFunction(() => document.querySelector("#savebar")?.hidden === true, null, { timeout: 12000 });
+    });
+
     console.log("\n== 5. mobiele viewport (390×844, echte Pi) ==");
     const mob = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await mob.goto(BASE + "/", { waitUntil: "networkidle" });

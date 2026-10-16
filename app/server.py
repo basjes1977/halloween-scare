@@ -132,6 +132,29 @@ class ServerContext:
     def _now() -> float:
         return time.time()
 
+    def builtin_items(self) -> list[dict]:
+        """Ingebouwde lussen (fallback-media) als kiesbare pseudo-items."""
+        return [
+            {"id": "builtin:rust", "name": "Ademhaling — kalm (ingebouwd)",
+             "wide": False, "width": 480, "height": 272, "frames": 81,
+             "fps": 16, "duration": 5.06, "builtin": True},
+            {"id": "builtin:jump", "name": "Schreeuw — jumpscare (ingebouwd)",
+             "wide": False, "width": 480, "height": 272, "frames": 98,
+             "fps": 16, "duration": 6.13, "builtin": True},
+        ]
+
+    def import_builtin(self, builtin_id: str) -> dict:
+        """Kopieer een ingebouwde lus naar de bibliotheek (beheerbaar)."""
+        if self.library is None:
+            raise RuntimeError("geen bibliotheek")
+        namen = {"builtin:rust": ("Ademhaling — kalm", "rust"),
+                 "builtin:jump": ("Schreeuw — jumpscare", "jump")}
+        if builtin_id not in namen:
+            raise ValueError(f"onbekende ingebouwde lus: {builtin_id}")
+        naam, mapnaam = namen[builtin_id]
+        bron = os.path.join(self.media_dir or ".", "loops", "frames", mapnaam)
+        return self.library.import_builtin(naam, bron)
+
     def goto(self, state_id: str) -> tuple[bool, str]:
         if state_id not in self._states():
             return False, f"onbekende state: {state_id}"
@@ -236,7 +259,8 @@ class GrimoriaHandler(BaseHTTPRequestHandler):
                 return self._json(filter_config(ctx.get_cfg()))
             if path == "/api/library":
                 items = ctx.library.list() if ctx.library else []
-                return self._json({"items": items, "ffmpeg": ffmpeg_available()})
+                return self._json({"items": items, "ffmpeg": ffmpeg_available(),
+                                    "builtin": ctx.builtin_items()})
             if path.startswith("/webui/"):
                 return self._static(path[len("/webui/"):])
             if path.startswith("/media/"):
@@ -275,6 +299,17 @@ class GrimoriaHandler(BaseHTTPRequestHandler):
         try:
             if path == "/api/library":
                 return self._upload()
+            m = re.fullmatch(r"/api/library/import/([A-Za-z0-9_%:\-]+)", path)
+            if m:
+                from urllib.parse import unquote
+                builtin_id = unquote(m.group(1))
+                try:
+                    item = ctx.import_builtin(builtin_id)
+                except ValueError as exc:
+                    return self._json({"error": str(exc)}, 404)
+                except Exception as exc:
+                    return self._json({"error": f"import mislukt: {exc}"}, 500)
+                return self._json({"ok": True, "item": item}, 201)
             if path == "/api/kind":
                 body = self._read_body()
                 if body is None:

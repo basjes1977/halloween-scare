@@ -258,6 +258,56 @@ class Library:
             pass
         return want_w, want_h
 
+    def import_builtin(self, naam: str, bron_dir: str, wide: bool = False) -> dict:
+        """Importeer een bestaande frames-directory (zoals de ingebouwde
+        Wan-lussen media/loops/frames/{rust,jump} — let op: map MET frames)
+        als bibliotheek-item.
+        Kopieert de frames (geen ffmpeg nodig) en registreert metadata;
+        afmetingen worden van het eerste frame gelezen indien PIL
+        beschikbaar is, anders conservatief geschat."""
+        if not os.path.isdir(bron_dir):
+            raise LibraryError("bronmap bestaat niet: %s" % bron_dir)
+        frames = sorted(f for f in os.listdir(bron_dir)
+                        if f.lower().endswith((".png", ".jpg", ".jpeg")))
+        if not frames:
+            raise LibraryError("geen frames in %s" % bron_dir)
+        mid = self._maak_id(naam)
+        item_dir = os.path.join(self._base, mid)
+        if os.path.exists(item_dir):
+            raise LibraryError("id al in gebruik: %s" % mid)
+        os.makedirs(os.path.join(item_dir, "frames"), exist_ok=True)
+        for f in frames:
+            shutil.copyfile(os.path.join(bron_dir, f),
+                            os.path.join(item_dir, "frames", f))
+        w, h = (1920 if wide else 480, 540 if wide else 272)
+        try:
+            from PIL import Image
+            with Image.open(os.path.join(item_dir, "frames", frames[0])) as im:
+                w, h = im.size
+        except Exception:
+            pass
+        item = {
+            "id": mid, "name": naam, "wide": bool(wide),
+            "width": w, "height": h,
+            "frames": len(frames), "fps": 16,
+            "duration": round(len(frames) / 16.0, 2),
+            "created": time.time(), "source": "builtin",
+        }
+        self._register(item)
+        return item
+
+    def _maak_id(self, naam: str) -> str:
+        import re as _re
+        slug = _re.sub(r"[^a-z0-9]+", "-",
+                       str(naam).lower()).strip("-")[:32] or "item"
+        kandidaat = slug
+        n = 1
+        while os.path.exists(os.path.join(self._base, kandidaat)) \
+                or any(it.get("id") == kandidaat for it in self.list()):
+            n += 1
+            kandidaat = f"{slug}-{n}"
+        return kandidaat
+
     def _register(self, item: dict) -> None:
         """Voeg item toe aan library.json (onder lock)."""
         lock_path = self._meta_path() + ".lock"

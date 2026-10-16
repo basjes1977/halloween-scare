@@ -1283,6 +1283,10 @@ async function wisselKindMode(aan) {
   try {
     await postKind(aan);
     if (state.config) state.config.kind_mode = aan; // lokaal gelijk houden
+    // auto-save-referentie bijwerken: kind zit buiten screens en zou
+    // anders elke latere screens-auto-save blokkeren
+    if (typeof _referentieUi !== "undefined" && _referentieUi)
+      _referentieUi.kind_mode = aan;
     toast(`Kind-modus ${aan ? "aan" : "uit"}`);
     checkOpslaan();
   } catch (e) {

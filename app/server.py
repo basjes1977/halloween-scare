@@ -240,7 +240,9 @@ class GrimoriaHandler(BaseHTTPRequestHandler):
                 return self._static("index.html")
             if path == "/state":  # legacy
                 return self._json(ctx._state_payload())
-            return self._json({}, 404)
+            # overige paden: statische assets uit de webui-map proberen
+            # (index.html refereert app.js/style.css relatief vanaf "/")
+            return self._static(path.lstrip("/"))
         except Exception as exc:  # nooit een crash naar de client lekken
             return self._json({"error": str(exc)}, 500)
 

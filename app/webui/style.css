@@ -3,6 +3,9 @@
    Vanilla CSS, geen frameworks, werkt offline in het LAN
    ============================================================ */
 
+/* het hidden-attribuut moet altijd winnen van display-regels */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #14100e;
   --bg2: #1e1714;

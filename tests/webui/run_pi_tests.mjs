@@ -75,6 +75,10 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       await page.waitForSelector("#ovl-el-0:not([hidden])", { timeout: 3000 });
     });
     await test("drag&drop overlay (echte muisbeweging)", async () => {
+      // bepaalde startpositie (vorige runs kunnen x op 0 hebben achtergelaten)
+      await page.fill("#ovl-x-0", "0.50");
+      await page.fill("#ovl-y-0", "0.50");
+      await page.waitForTimeout(150);
       const el = page.locator("#ovl-el-0");
       const box = await el.boundingBox();
       const x0 = await page.locator("#ovl-x-0").inputValue();
@@ -84,6 +88,11 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       await page.mouse.up();
       const x1 = await page.locator("#ovl-x-0").inputValue();
       if (x1 === x0) throw new Error(`x ongewijzigd (${x0})`);
+      // auto-save-regime: geef de debounce tijd en check de server
+      await page.waitForTimeout(1200);
+      const cfgx = await api("/api/config");
+      if (cfgx.screens.items[0].overlay.x === 0.5 && x1 !== "0.50")
+        throw new Error("overlay-positie niet auto-opgeslagen");
     });
     await test("rotatieknop draait preview", async () => {
       await page.locator('#screens-grid .card').first().locator('[data-rot="270"]').click();
@@ -171,19 +180,16 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       const status = await page.locator("#wand-status").textContent();
       if (!/links|swap|gespiegeld/i.test(status)) throw new Error("status: " + status);
     });
-    await test("layout wijziging maakt dirty", async () => {
-      if (await page.locator("#savebar").evaluate(e => e.hidden))
-        throw new Error("geen dirty na wand-sleep");
+    await test("layout wijziging slaat automatisch op", async () => {
+      await page.waitForTimeout(1200);   // auto-save debounce
+      const cfgl = await api("/api/config");
+      if (!(cfgl.screens.layout?.swap === true))
+        throw new Error("layout niet auto-opgeslagen: " + JSON.stringify(cfgl.screens.layout));
     });
     await test("opslaan persisteert layout", async () => {
-      const putP2 = page.waitForResponse(
-        r => r.url().endsWith("/api/config") && r.request().method() === "PUT",
-        { timeout: 8000 }).catch(() => null);
-      await page.click("#btn-save");
-      const putRes2 = await putP2;
-      if (putRes2) laatstGeschrevenDoorTest = JSON.parse(putRes2.request().postData());
-      await page.waitForFunction(
-        () => document.querySelector("#savebar")?.hidden === true, null, { timeout: 8000 });
+      // auto-save-regime: sla direct op via de UI-functies (de savebar kan
+      // al leeg zijn omdat auto-save voor was)
+      await page.waitForTimeout(1200);
       const cfg = await api("/api/config");
       const lay = cfg.screens.layout || {};
       if (lay.mode !== "horizontal" || lay.swap !== true)

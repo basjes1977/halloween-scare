@@ -100,16 +100,8 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       if (!t.includes("270")) throw new Error("transform=" + t);
     });
     await test("opslaan persisteert naar de Pi", async () => {
-      await page.waitForSelector("#savebar:not([hidden])", { timeout: 3000 }).catch(() => {});
-      const putP = page.waitForResponse(
-        r => r.url().endsWith("/api/config") && r.request().method() === "PUT",
-        { timeout: 8000 }).catch(() => null);
-      await page.click("#btn-save");
-      const putRes = await putP;
-      if (putRes) laatstGeschrevenDoorTest = JSON.parse(putRes.request().postData());
-      await page.waitForFunction(
-        () => document.querySelector("#savebar")?.hidden === true,
-        null, { timeout: 8000 });
+      // auto-save-regime: wacht op de debounce-PUT i.p.v. de savebar-knop
+      await page.waitForTimeout(1200);
       const cfg = await api("/api/config");
       if (cfg.screens.items[0].overlay.text !== "TEST123")
         throw new Error("overlay niet gepersisteerd: " + JSON.stringify(cfg.screens.items[0].overlay));

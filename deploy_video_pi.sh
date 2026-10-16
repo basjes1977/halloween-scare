@@ -12,7 +12,7 @@ RESTART=1
 
 APP=/mnt/media/halloween/app
 STAMP=$(date +%Y%m%dT%H%M%S)
-PYFILES="grimoria_pi.py renderer.py engine.py library.py api_v2.py detector.py"
+PYFILES="grimoria_pi.py renderer.py engine.py library.py detector.py schemas.py server.py"
 
 echo "== 1. connectivity check =="
 ping -c 1 -W 2 192.168.178.85 >/dev/null || { echo "Pi offline — probeer later opnieuw"; exit 1; }
@@ -37,10 +37,15 @@ else
 fi
 [ -e "$HQ/app/test_video_mode.py" ] && \
   cat "$HQ/app/test_video_mode.py" | ssh "$PI" "cat > $APP/test_video_mode.py"
-for f in $PYFILES webui/index.html webui/app.js webui/style.css; do
+for f in $PYFILES; do
   [ -e "$HQ/app/$f" ] || { echo "   ontbreekt lokaal, overslagen: app/$f"; continue; }
   cat "$HQ/app/$f" | ssh "$PI" "cat > $APP/$f"
 done
+# webui (hele map, zodat toekomstige extra bestanden meekomen)
+ssh "$PI" "mkdir -p $APP/webui"
+(cd "$HQ/app/webui" && tar cf - .) | ssh "$PI" "cd $APP/webui && tar xf -"
+# bibliotheek-map voor uploads (bestaat mogelijk nog niet op de Pi)
+ssh "$PI" "mkdir -p /mnt/media/halloween/media/library /mnt/media/halloween/logs"
 
 echo "== 4. herstart grimoria =="
 if [ "$RESTART" = 1 ]; then

@@ -175,7 +175,11 @@ class ServerContext:
             else:
                 self.engine.kind_mode = bool(clean.get("kind_mode", False))
             self.on_cfg_applied(clean)
-            return True, []
+            # layout-wijziging vraagt om een venster-herstart (andere afmeting)
+            herstart = ((full.get("screens", {}) or {}).get("layout")
+                        != (clean.get("screens", {}) or {}).get("layout"))
+            return True, (["vensterherstart nodig (layout gewijzigd)"]
+                          if herstart else [])
 
 
 class GrimoriaHandler(BaseHTTPRequestHandler):

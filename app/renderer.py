@@ -357,6 +357,8 @@ uniform vec2  u_rot01;    // rotatie scherm0/scherm1 (radialen)
 uniform float u_fmix0;    // crossfade scherm0
 uniform float u_fmix1;    // crossfade scherm1
 uniform float u_fmixW;    // crossfade wide
+uniform float u_vert;     // 0 = schermen naast elkaar, 1 = boven elkaar
+uniform float u_swap;     // 1 = volgorde van de schermen gespiegeld
 uniform sampler2D u_texA0;
 uniform sampler2D u_texB0;
 uniform sampler2D u_texA1;
@@ -389,22 +391,38 @@ vec2 rot_uv(vec2 l, float rot){
 
 void main(){
     float t = u_time;
-    float side = step(0.5, v_uv.x);            // 0 = scherm0 (links), 1 = scherm1
-    float su = fract(v_uv.x * 2.0);            // 0..1 binnen het scherm
-    float sv = v_uv.y;
+    // scherm-index en within-screen uv, layout-bewust:
+    // horizontal: veld gesplitst op x (naast elkaar), vertical: op y (gestapeld)
+    float sel, su, sv;
+    if (u_vert > 0.5){
+        sel = step(0.5, v_uv.y);          // 0 = boven, 1 = onder
+        su = v_uv.x;
+        sv = fract(v_uv.y * 2.0);
+    } else {
+        sel = step(0.5, v_uv.x);          // 0 = links, 1 = rechts
+        su = fract(v_uv.x * 2.0);
+        sv = v_uv.y;
+    }
+    float side = mix(sel, 1.0 - sel, u_swap);   // logische scherm-index
     float rot = mix(u_rot01.x, u_rot01.y, side);
-
-    vec2 l = rot_uv(vec2(su, sv), rot);
+    float l_x = su;
+    float l_y = sv;
+    vec2 l = rot_uv(vec2(l_x, l_y), rot);
     float inframe = step(abs(l.x - 0.5), 0.5) * step(abs(l.y - 0.5), 0.5);
 
     vec3 col;
     if (u_wide > 0.5){
-        // doorlopend canvas: texture-u loopt over beide schermen; de
-        // bezel-overlap trekt de helften in elkaar zodat de randen aansluiten
+        // doorlopend canvas: u loopt over beide schermen, richting volgt layout
         float ov = u_bezel.x;
-        float tu = mix(l.x * (0.5 + ov), (0.5 - ov) + l.x * (0.5 + ov), side);
-        float tv = clamp(l.y + u_bezel.y, 0.0, 1.0);
-        vec2 cuv = vec2(tu, tv);
+        float tu, tv;
+        if (u_vert > 0.5){
+            tu = clamp(l.x + u_bezel.y, 0.0, 1.0);
+            tv = mix(l.y * (0.5 + ov), (0.5 - ov) + l.y * (0.5 + ov), side);
+        } else {
+            tu = mix(l.x * (0.5 + ov), (0.5 - ov) + l.x * (0.5 + ov), side);
+            tv = clamp(l.y + u_bezel.y, 0.0, 1.0);
+        }
+        vec2 cuv = vec2(mix(tu, 1.0 - tu, u_swap), tv);
         vec3 a = texture(u_texAW, cuv).rgb;
         vec3 b = texture(u_texBW, cuv).rgb;
         col = mix(a, b, smoothstep(0.0, 1.0, u_fmixW)) * inframe;
@@ -803,9 +821,15 @@ class Renderer:
         bg.blit(surf, (pad, pad // 2))
         tex = self._surface_to_tex(bg)
         w, h = bg.get_size()
-        wl = self.win_w // 2
-        cx = screen * wl + x * wl
-        cy = y * self.win_h
+        vert = getattr(self, "_layout_vert", False)
+        swap = getattr(self, "_layout_swap", False)
+        scr = (1 - screen) if swap else screen
+        if vert:
+            cx = x * self.win_w
+            cy = scr * self.win_h + y * (self.win_h // 2)
+        else:
+            cx = scr * (self.win_w // 2) + x * (self.win_w // 2)
+            cy = y * self.win_h
         vao = self._quad_vao(cx - w // 2, cy - h // 2, w, h)
         return tex, vao
 
@@ -945,6 +969,9 @@ class Renderer:
         up["u_wide"].value = wide
         up["u_bezel"].value = (float(bez[0]), float(bez[1]))
         up["u_rot01"].value = (rot0, rot1)
+        lay = info.get("layout", {}) or {}
+        up["u_vert"].value = 1.0 if lay.get("mode") == "vertical" else 0.0
+        up["u_swap"].value = 1.0 if lay.get("swap") else 0.0
 
         def pair(mid, u_fmix_name, unit_a, unit_b):
             paths = self._v2_frames(mid) if mid else None
@@ -986,6 +1013,9 @@ class Renderer:
             self.fbo_tex.use(0)
             self.up_vao.render(moderngl.TRIANGLES)
         # 3) overlay-items op volledige resolutie (fysieke orientatie)
+        lay2 = info.get("layout", {}) or {}
+        self._layout_vert = lay2.get("mode") == "vertical"
+        self._layout_swap = bool(lay2.get("swap"))
         self.render_overlay(info.get("overlay", []))
 
     def _render_scene(self, grim):

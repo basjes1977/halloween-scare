@@ -46,17 +46,35 @@
 
     <!-- ============ TAB 1: SCHERMEN ============ -->
     <section class="tabpanel" id="tab-screens" role="tabpanel" aria-label="Schermen">
+
+      <!-- visuele wand-editor: plaatsing (snap) + rotatie van beide schermen -->
+      <fieldset class="card" id="wand-card">
+        <legend>Wand-indeling</legend>
+        <p class="hint wand-uitleg">
+          Sleep een scherm naar een nieuwe plek: rechts, links, boven of onder het andere scherm
+          (er wordt gesnapt). De hendel rechtsboven draait het scherm; de knoppen rechtsonder
+          zetten 0/90/180/270°. Toetsenbord: tab naar een scherm, pijltjes = plaatsen,
+          <kbd>r</kbd> = 90° draaien. Scherm 1/2 hier = scherm-index 0/1 in de kaarten en fases
+          hieronder.
+        </p>
+        <div class="wand-canvas" id="wand-canvas"></div>
+        <div class="wand-status" id="wand-status" aria-live="polite"></div>
+        <div class="wand-mini-rij">
+          <span class="hint">Totaalbeeld:</span>
+          <div class="wand-mini" id="wand-mini" aria-hidden="true"></div>
+        </div>
+      </fieldset>
+
       <!-- per-scherm kaarten worden door app.js gevuld -->
       <div class="screens-grid" id="screens-grid"></div>
 
       <!-- globale scherm-instellingen -->
       <fieldset class="card">
         <legend>Schermen algemeen</legend>
-        <div class="row">
-          <label class="switch" title="Wisselt de rol van scherm 0 en scherm 1">
-            <input type="checkbox" id="scr-swap"><span class="track"></span>Schermen wisselen (swap)
-          </label>
-        </div>
+        <p class="hint">
+          Plaatsing en rol-wissel (swap) stel je in met de Wand-indeling hierboven;
+          de offsets (o.a. bezel-correctie) blijven hier.
+        </p>
         <div class="row offset-rij">
           <label class="field inline">
             Offset dx <span class="mini" id="val-scr-dx">0,000</span>

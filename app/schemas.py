@@ -43,6 +43,7 @@ import copy
 
 DEFAULT_CONFIG: dict = {
     "screens": {
+        "layout": {"mode": "horizontal", "swap": False},
         "swap": False,
         "offset": {"dx": 0.0, "dy": 0.0},
         "items": [
@@ -125,6 +126,7 @@ DEFAULT_CONFIG: dict = {
 # Toegestane waarden per veld (voor validatie)
 _CANVAS_MODES = ("split", "wide")
 _ROTATIONS = (0, 90, 180, 270)
+_LAYOUT_MODES = ("horizontal", "vertical")
 
 
 def _is_num(v) -> bool:
@@ -166,6 +168,24 @@ def _validate_screens(screens, errors: list) -> dict:
     if not isinstance(screens, dict):
         errors.append("screens: moet een object zijn — defaults gebruikt")
         return clean
+
+    # layout: horizontale of verticale plaatsing van de twee schermen;
+    # mode horizontal = naast elkaar (3840x1080-venster), vertical = boven
+    # elkaar (1920x2160). swap = spiegelvolgorde. Backwards compat: ontbreekt
+    # layout maar bestaat screens.swap → daaruit afleiden.
+    lay = screens.get("layout")
+    if isinstance(lay, dict) and lay.get("mode") in _LAYOUT_MODES:
+        clean["layout"] = {"mode": lay["mode"],
+                           "swap": bool(lay.get("swap", False))}
+    else:
+        if lay is not None:
+            errors.append("screens.layout: verwacht {mode, swap} met mode "
+                          "'horizontal' of 'vertical' — afgeleid uit swap")
+        raw_swap = screens.get("swap", False)
+        clean["layout"] = {"mode": "horizontal",
+                           "swap": raw_swap is True}
+    # swap blijft als afgeleid veld bestaan (oudere consumers)
+    clean["swap"] = clean["layout"]["swap"]
 
     _fix_bool(screens, "swap", clean["swap"])
     clean["swap"] = bool(screens["swap"])

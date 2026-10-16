@@ -194,7 +194,8 @@ function uiNaarConfig() {
   const c = kloon(state.config);
 
   // schermen algemeen
-  c.screens.swap = $("scr-swap").checked;
+  c.screens.layout = wandLeesLayout();
+  c.screens.swap = c.screens.layout.swap; // afgeleid veld, synchroon houden
   c.screens.offset.dx = num($("scr-dx").value);
   c.screens.offset.dy = num($("scr-dy").value);
 
@@ -275,7 +276,7 @@ function checkOpslaan() {
 function configNaarUi() {
   const c = state.config;
 
-  $("scr-swap").checked = !!c.screens?.swap;
+  wandZetLayout(wandNormaliseerLayout(c.screens?.layout, c.screens?.swap));
   $("scr-dx").value = num(c.screens?.offset?.dx);
   $("scr-dy").value = num(c.screens?.offset?.dy);
   $("val-scr-dx").textContent = fmt(num(c.screens?.offset?.dx), 3);
@@ -284,7 +285,7 @@ function configNaarUi() {
   for (let i = 0; i < 2; i++) {
     const item = c.screens?.items?.[i] || {};
     const rot = num(item.rotation);
-    zetRotatieUi(i, rot);
+    zetRotatieUi(i, rot, true);
     const ov = item.overlay || {};
     $(`ovl-aan-${i}`).checked = !!ov.enabled;
     $(`ovl-tekst-${i}`).value = ov.text || "";
@@ -404,16 +405,402 @@ function bouwSchermKaarten() {
     koppelOverlayDrag(i);
     updateOverlayEl(i);
   }
+
+  bouwWandEditor();
 }
 
-/** Rotatie-knoppen + placeholder-transform bijwerken. */
-function zetRotatieUi(i, graden) {
+/** Rotatie-knoppen + placeholder-transform bijwerken (en de wand mee laten draaien). */
+function zetRotatieUi(i, graden, ookWand = true) {
   const groep = $(`rot-${i}`);
   groep.dataset.val = String(graden);
   for (const btn of groep.querySelectorAll("button")) {
     btn.classList.toggle("active", num(btn.dataset.rot) === graden);
   }
   $(`prev-img-${i}`).style.transform = `rotate(${graden}deg)`;
+  if (ookWand) wandZetRotatie(i, graden);
+}
+
+/* ============================================================
+ * Wand-editor — visuele plaatsing + rotatie van beide schermen
+ * ============================================================ */
+
+const wand = {
+  zone: "rechts",        // huidige snap-positie van scherm 1
+  drag: null,            // actieve pointer-sleep ({pointerId, i, dx, dy})
+  hendelSleepte: false,  // hendel werd gesleept (onderdrukt de klik-draai)
+  laatsteZone: null,     // zone waar de ghost tijdens de laatste sleep stond
+};
+
+/** zone → {mode, swap} volgens het vaste contract uit het ontwerpdoc. */
+function zoneNaarLayout(zone) {
+  switch (zone) {
+    case "links":  return { mode: "horizontal", swap: true };
+    case "boven":  return { mode: "vertical",   swap: false };
+    case "onder": return { mode: "vertical",   swap: true };
+    case "rechts":
+    default:       return { mode: "horizontal", swap: false };
+  }
+}
+
+/** {mode, swap} → zone (omgekeerde van zoneNaarLayout). */
+function layoutNaarZone(mode, swap) {
+  if (mode === "vertical") return swap ? "onder" : "boven";
+  return swap ? "links" : "rechts";
+}
+
+/**
+ * Normaliseer screens.layout met backwards compat:
+ * geldig layout-object → die; ontbreekt → afleiden uit screens.swap
+ * (horizontal: swap→links, anders rechts).
+ */
+function wandNormaliseerLayout(layout, oudeSwap) {
+  if (layout && typeof layout === "object" &&
+      (layout.mode === "horizontal" || layout.mode === "vertical")) {
+    return { mode: layout.mode, swap: !!layout.swap };
+  }
+  return { mode: "horizontal", swap: !!oudeSwap };
+}
+
+/**
+ * Layout → fractieposities (0..1) van de twee blok-centra in de canvas.
+ * Blokken zijn 34% van de canvasbreedte (16:9), dus centra op 1/3 en 2/3.
+ */
+function layoutNaarPosities(mode, swap) {
+  if (mode === "vertical") {
+    // boven (swap:false): scherm 1 boven scherm 0 · onder (swap:true): andersom
+    return swap
+      ? { s0: { x: 0.5, y: 0.33 }, s1: { x: 0.5, y: 0.67 } }
+      : { s0: { x: 0.5, y: 0.67 }, s1: { x: 0.5, y: 0.33 } };
+  }
+  return swap
+    ? { s0: { x: 0.67, y: 0.5 }, s1: { x: 0.33, y: 0.5 } }
+    : { s0: { x: 0.33, y: 0.5 }, s1: { x: 0.67, y: 0.5 } };
+}
+
+/** Nadenkstap: bij welke zone zou scherm 1 landen als het nu op p punt? */
+function wandZoneOpPunt(p) {
+  const hoek = Math.abs(p.dy) / Math.max(Math.abs(p.dx), 1e-6);
+  if (Math.abs(p.dx) < 0.08 && Math.abs(p.dy) < 0.08) return null; // op eigen plek
+  if (hoek > 1) return p.dy < 0 ? "boven" : "onder";
+  return p.dx < 0 ? "links" : "rechts";
+}
+
+/**
+ * Zone voor een sleep op blok i. De zone beschrijft scherm 1 t.o.v. scherm 0,
+ * dus voor blok 0 spiegelen: blok 0 naar links slepen = scherm 1 komt rechts.
+ */
+function wandZoneVoorBlok(i, p) {
+  const z = wandZoneOpPunt(p);
+  if (!z || i !== 0) return z;
+  const spiegel = { links: "rechts", rechts: "links", boven: "onder", onder: "boven" };
+  return spiegel[z];
+}
+
+/** UI van de wand lezen (voor uiNaarConfig). */
+function wandLeesLayout() {
+  return zoneNaarLayout(wand.zone);
+}
+
+/** Wand volledig herbouwen — rotaties en layout door één functie laten lopen. */
+function wandVervers() {
+  const canvas = $("wand-canvas");
+  const r0 = num($("rot-0").dataset.val),
+        r1 = num($("rot-1").dataset.val);
+  const pos = layoutNaarPosities(zoneNaarLayout(wand.zone).mode, zoneNaarLayout(wand.zone).swap);
+
+  canvas.innerHTML = "";
+  for (let i = 0; i < 2; i++) {
+    const p = PREVIEWS[String(i)] || {};
+    const blok = document.createElement("div");
+    blok.className = "wand-blok";
+    blok.dataset.scherm = String(i);
+    blok.tabIndex = 0;
+    blok.setAttribute("role", "application");
+    blok.setAttribute("aria-roledescription", "scherm-blok");
+    blok.setAttribute("aria-label", `Scherm ${i + 1}: pijltjes plaatsen, r draait`);
+    blok.style.left = `${pos["s" + i].x * 100}%`;
+    blok.style.top = `${pos["s" + i].y * 100}%`;
+    blok.innerHTML = `
+      <img class="placeholder" src="${p.file || ""}" alt="">
+      <span class="wand-label">Scherm ${i + 1}</span>
+      <span class="wand-rot" aria-hidden="true">${num([r0, r1][i])}°</span>
+      <button type="button" class="wand-hendel" data-i="${i}" aria-label="Draai scherm ${i + 1} (houd ingedrukt en sleep)" title="Draaien (slepen)">⟳</button>
+      <span class="wand-snap-knoppen" role="group" aria-label="Rotatie-presets scherm ${i + 1}">
+        <button type="button" data-wrot="0">0°</button>
+        <button type="button" data-wrot="90">90°</button>
+        <button type="button" data-wrot="180">180°</button>
+        <button type="button" data-wrot="270">270°</button>
+      </span>`;
+    canvas.appendChild(blok);
+
+    // mini-preview in het blok getrouw roteren
+    const img = blok.querySelector(".placeholder");
+    img.style.transform = `rotate(${[r0, r1][i]}deg)`;
+
+    // rotatie-presets (actieve stand markeren)
+    blok.querySelectorAll("button[data-wrot]").forEach((btn) => {
+      btn.classList.toggle("active", num(btn.dataset.wrot) === [r0, r1][i]);
+      btn.addEventListener("click", () => {
+        zetRotatieUi(i, num(btn.dataset.wrot));
+        checkOpslaan();
+      });
+    });
+
+    koppelWandDrag(blok, i);
+  }
+
+  wandZetStatus();
+  wandTekenMini();
+}
+
+/** Volledige wand opnieuw opbouwen met een nieuwe zone. */
+function wandZetZone(zone) {
+  if (zone === wand.zone) { wandVervers(); return; }
+  wand.zone = zone;
+  wandVervers();
+  checkOpslaan();
+}
+
+/** Layout {mode, swap} → wand (via configNaarUi). */
+function wandZetLayout(layout) {
+  wand.zone = layoutNaarZone(layout.mode, layout.swap);
+  wandVervers();
+}
+
+/** Rotatie van één scherm zetten (vanuit de kaart-rot-groep óf de wand). */
+function wandZetRotatie(i, graden) {
+  const blok = document.querySelector(`.wand-blok[data-scherm="${i}"]`);
+  if (!blok) return;
+  blok.querySelector(".placeholder").style.transform = `rotate(${graden}deg)`;
+  blok.querySelector(".wand-rot").textContent = `${graden}°`;
+  for (const btn of blok.querySelectorAll("button[data-wrot]")) {
+    btn.classList.toggle("active", num(btn.dataset.wrot) === graden);
+  }
+  wandTekenMini();
+}
+
+/** Statusregel onder de canvas (WYSIWYG-tekst). */
+function wandZetStatus() {
+  const l = zoneNaarLayout(wand.zone);
+  const naam = { rechts: "Scherm 2 rechts van scherm 1", links: "Scherm 2 links van scherm 1",
+                 boven: "Scherm 2 boven scherm 1", onder: "Scherm 2 onder scherm 1" }[wand.zone];
+  $("wand-status").textContent =
+    `${naam} — layout: { mode: "${l.mode}", swap: ${l.swap ? "true" : "false"} }`;
+}
+
+/** WYSIWYG: mini-weergave van het totaalbeeld (grote canvas → wand). */
+function wandTekenMini() {
+  const mini = $("wand-mini");
+  if (!mini) return;
+  const r0 = num($("rot-0").dataset.val), r1 = num($("rot-1").dataset.val);
+  const l = zoneNaarLayout(wand.zone);
+  const pos = layoutNaarPosities(l.mode, l.swap);
+  mini.innerHTML = "";
+  for (let i = 0; i < 2; i++) {
+    const p = PREVIEWS[String(i)] || {};
+    const d = document.createElement("div");
+    d.className = "wand-mini-blok";
+    d.title = `Scherm ${i + 1}: ${[r0, r1][i]}°`;
+    d.style.left = `${pos["s" + i].x * 100}%`;
+    d.style.top = `${pos["s" + i].y * 100}%`;
+    d.style.backgroundImage = `url("${p.file || ""}")`;
+    const img = document.createElement("img");
+    img.src = p.file || "";
+    img.alt = "";
+    img.style.transform = `rotate(${[r0, r1][i]}deg)`;
+    d.appendChild(img);
+    mini.appendChild(d);
+  }
+}
+
+/** Drag & drop van een scherm-blok (pointer events, snap op 4 zones). */
+function koppelWandDrag(blok, i) {
+  const canvas = $("wand-canvas");
+
+  const start = (e) => {
+    if (e.target.closest("button")) return; // knoppen doen hun eigen ding
+    e.preventDefault();
+    try { blok.setPointerCapture(e.pointerId); } catch { /* capture kan falen (synthetisch/oude browser) */ }
+    blok.classList.add("drag");
+    const r = blok.getBoundingClientRect();
+    wand.drag = {
+      pointerId: e.pointerId, i,
+      dx: e.clientX - (r.left + r.width / 2),
+      dy: e.clientY - (r.top + r.height / 2),
+    };
+    wandTekenGhost(wandZoneVoorBlok(i, deltaTovCentrum(e)));
+  };
+
+  /** positie van de pointer (met grijp-offset) als fractie t.o.v. canvas-centrum */
+  function deltaTovCentrum(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      dx: (e.clientX - wand.drag.dx - (rect.left + rect.width / 2)) / rect.width,
+      dy: (e.clientY - wand.drag.dy - (rect.top + rect.height / 2)) / rect.height,
+    };
+  }
+
+  const verplaats = (e) => {
+    if (!wand.drag || e.pointerId !== wand.drag.pointerId) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2,
+          cy = rect.top + rect.height / 2;
+    const p = {
+      dx: (e.clientX - wand.drag.dx - cx) / rect.width,
+      dy: (e.clientY - wand.drag.dy - cy) / rect.height,
+    };
+    blok.style.left = `${(e.clientX - wand.drag.dx - rect.left) / rect.width * 100}%`;
+    blok.style.top = `${(e.clientY - wand.drag.dy - rect.top) / rect.height * 100}%`;
+    wandTekenGhost(wandZoneVoorBlok(wand.drag.i, p));
+  };
+
+  const klaar = (e) => {
+    if (!wand.drag || e.pointerId !== wand.drag.pointerId) return;
+    wand.drag = null;
+    blok.classList.remove("drag");
+    try { blok.releasePointerCapture(e.pointerId); } catch { /* al los */ }
+    const zone = wand.laatsteZone;
+    wand.laatsteZone = null;
+    wandVerwijderGhost();
+    if (zone && zone !== wand.zone) {
+      wandZetZone(zone);      // herbouwt de wand + checkOpslaan
+    } else {
+      wandVervers();          // blok terug op zijn snap-positie
+    }
+  };
+
+  blok.addEventListener("pointerdown", start);
+  blok.addEventListener("pointermove", verplaats);
+  blok.addEventListener("pointerup", klaar);
+  blok.addEventListener("pointercancel", klaar);
+}
+
+/** Snap-ghost tonen op de beoogde positie (visual feedback tijdens het slepen). */
+function wandTekenGhost(zone) {
+  wand.laatsteZone = zone;
+  wandVerwijderGhost();
+  if (!zone) return;
+  const l = zoneNaarLayout(zone);
+  const pos = layoutNaarPosities(l.mode, l.swap);
+  // ghost = positie waar het gesleepte blok zou landen
+  const i = wand.drag ? wand.drag.i : 1;
+  const ghost = document.createElement("div");
+  ghost.className = "wand-ghost";
+  ghost.dataset.zone = zone;
+  ghost.style.left = `${pos["s" + i].x * 100}%`;
+  ghost.style.top = `${pos["s" + i].y * 100}%`;
+  $("wand-canvas").appendChild(ghost);
+  wandZetStatusOpZone(zone);
+}
+
+function wandVerwijderGhost() {
+  document.querySelectorAll(".wand-ghost").forEach((g) => g.remove());
+}
+
+function wandZetStatusOpZone(zone) {
+  if (!zone) { wandZetStatus(); return; }
+  const l = zoneNaarLayout(zone);
+  const naam = { rechts: "Scherm 2 komt rechts van scherm 1", links: "Scherm 2 komt links van scherm 1",
+                 boven: "Scherm 2 komt boven scherm 1", onder: "Scherm 2 komt onder scherm 1" }[zone];
+  $("wand-status").textContent =
+    `${naam} — layout: { mode: "${l.mode}", swap: ${l.swap ? "true" : "false"} }`;
+}
+
+/** Bouw de wand-editor (één keer; blokken worden bij zone-wissel herbouwd). */
+function bouwWandEditor() {
+  if (!$("wand-canvas")) return; // guard voor oude markup/tests
+  wandVervers();
+  wandKoppelHendels();
+  wandKoppelToetsen();
+}
+
+/** Rotatie-hendel: hoek slepen rond het blok-middelpunt (pointer events). */
+function wandKoppelHendels() {
+  // Hendelen zijn per blok; koppel aan de canvas (delegatie) omdat blokken
+  // bij elke ververs opnieuw gebouwd worden.
+  const canvas = $("wand-canvas");
+  let sleep = null; // {pointerId, i, blok, cx, cy, startHoek, startRot}
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const hendel = e.target.closest(".wand-hendel");
+    if (!hendel) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const i = num(hendel.dataset.i);
+    const blok = hendel.closest(".wand-blok");
+    const r = blok.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    sleep = { pointerId: e.pointerId, i, blok, hendel, cx, cy,
+              startRot: num($(`rot-${i}`).dataset.val),
+              startHoek: Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI };
+    wand.hendelSleepte = false;
+    try { hendel.setPointerCapture(e.pointerId); } catch { /* idem */ }
+    blok.classList.add("draai");
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!sleep || e.pointerId !== sleep.pointerId) return;
+    const hoek = Math.atan2(e.clientY - sleep.cy, e.clientX - sleep.cx) * 180 / Math.PI;
+    let delta = hoek - sleep.startHoek;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    wand.hendelSleepte = true;
+    let rot = sleep.startRot + delta;
+    // vastklikken op veelvouden van 90° als we dicht in de buurt komen
+    const snapNabij = Math.round(rot / 90) * 90;
+    if (Math.abs(rot - snapNabij) < 8) rot = snapNabij;
+    rot = ((rot % 360) + 360) % 360;
+    zetRotatieUi(sleep.i, Math.round(rot));
+  });
+
+  const klaar = (e) => {
+    if (!sleep || e.pointerId !== sleep.pointerId) return;
+    const { blok, hendel } = sleep;
+    sleep = null;
+    blok.classList.remove("draai");
+    try { hendel.releasePointerCapture(e.pointerId); } catch { /* al los */ }
+    checkOpslaan();
+  };
+  canvas.addEventListener("pointerup", klaar);
+  canvas.addEventListener("pointercancel", klaar);
+
+  // hendel als echte knop: activeren (klik/Enter/spatie) = +90° draaien,
+  // tenzij er net gehendeld (gesleept) is
+  canvas.addEventListener("click", (e) => {
+    const hendel = e.target.closest(".wand-hendel");
+    if (!hendel || wand.hendelSleepte) return;
+    const i = num(hendel.dataset.i);
+    zetRotatieUi(i, (num($(`rot-${i}`).dataset.val) + 90) % 360);
+    checkOpslaan();
+  });
+}
+
+/** Toetsenbord: pijltjes = zone kiezen, r = 90° draaien van het gefocuste blok. */
+function wandKoppelToetsen() {
+  $("wand-canvas").addEventListener("keydown", (e) => {
+    const blok = e.target.closest(".wand-blok");
+    if (!blok) return;
+    const i = num(blok.dataset.scherm);
+    const zoneMap = { ArrowRight: "rechts", ArrowLeft: "links", ArrowUp: "boven", ArrowDown: "onder" };
+    if (zoneMap[e.key]) {
+      e.preventDefault();
+      // pijl beweegt het gebediende blok in die richting; voor blok 0
+      // spiegelen (zone beschrijft scherm 1 t.o.v. scherm 0)
+      const zone = i === 0
+        ? { links: "rechts", rechts: "links", boven: "onder", onder: "boven" }[zoneMap[e.key]]
+        : zoneMap[e.key];
+      wandZetZone(zone);
+      // focus behouden op hetzelfde blok na de rebuild
+      document.querySelector(`.wand-blok[data-scherm="${i}"]`)?.focus();
+      return;
+    }
+    if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      const rot = (num($(`rot-${i}`).dataset.val) + 90) % 360;
+      zetRotatieUi(i, rot);
+      checkOpslaan();
+    }
+  });
 }
 
 /** Preview-overlay-element afleiden uit de formulierwaarden. */
@@ -805,8 +1192,8 @@ async function wisselKindMode(aan) {
 }
 
 function koppelEvents() {
-  // schermen algemeen
-  for (const id of ["scr-swap", "scr-dx", "scr-dy"]) {
+  // schermen algemeen (swap/positie zit in de wand-editor; offsets hier)
+  for (const id of ["scr-dx", "scr-dy"]) {
     $(id).addEventListener("change", checkOpslaan);
     $(id).addEventListener("input", () => {
       $("val-scr-dx").textContent = fmt($("scr-dx").value, 3);

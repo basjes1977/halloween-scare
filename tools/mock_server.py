@@ -51,6 +51,7 @@ TOEGESTANE_EXT = {".mp4", ".webm", ".mkv"}
 FAKE_CONFIG: dict = {
     "screens": {
         "swap": False,
+        "layout": {"mode": "horizontal", "swap": False},
         "offset": {"dx": 0.0, "dy": 0.0},
         "items": [
             {

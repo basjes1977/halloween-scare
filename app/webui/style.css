@@ -278,6 +278,180 @@ label.radio, label.check {
 }
 .radio-line { margin: 4px 0; }
 
+/* ---------- wand-editor (Schermen-tab, bovenaan) ---------- */
+.wand-uitleg { margin: 4px 0 10px; }
+
+.wand-canvas {
+  position: relative;
+  width: 100%;
+  max-width: 720px;            /* ~16:9, responsive */
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  background:
+    radial-gradient(circle at 30% 40%, rgba(139, 92, 246, .05), transparent 50%),
+    repeating-linear-gradient(45deg, #0d0a08 0 12px, #0a0705 12px 24px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  touch-action: none;           /* pointer events voor touch-drag */
+  user-select: none;
+}
+
+.wand-blok {
+  position: absolute;
+  width: 34%;
+  aspect-ratio: 16 / 9;
+  transform: translate(-50%, -50%);
+  background: #000;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+.wand-blok.drag { cursor: grabbing; z-index: 5; }
+.wand-blok:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.wand-blok .placeholder {
+  transition: transform .15s ease-out;
+}
+
+.wand-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  z-index: 2;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, .6);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+.wand-rot {
+  position: absolute;
+  top: 4px;
+  right: 30px;
+  z-index: 2;
+  font-size: 11px;
+  color: var(--txt-dim);
+  background: rgba(0, 0, 0, .6);
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.wand-hendel {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(30, 23, 20, .9);
+  color: var(--txt);
+  font-size: 15px;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+.wand-hendel:active { cursor: grabbing; }
+.wand-blok.draai .wand-hendel { border-color: var(--accent); color: var(--accent); }
+
+.wand-snap-knoppen {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  z-index: 3;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg2);
+}
+.wand-snap-knoppen button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--txt-dim);
+  border-left: 1px solid var(--border);
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 11px;   /* na 'font: inherit' zodat de shorthand de size niet reset */
+  line-height: 1.2;
+  cursor: pointer;
+}
+.wand-snap-knoppen button:first-child { border-left: none; }
+.wand-snap-knoppen button:hover { color: var(--txt); }
+.wand-snap-knoppen button.active { background: var(--accent); color: #1d0f02; font-weight: 600; }
+
+/* snap-ghost tijdens het slepen */
+.wand-ghost {
+  position: absolute;
+  width: 34%;
+  aspect-ratio: 16 / 9;
+  transform: translate(-50%, -50%);
+  border: 2px dashed var(--accent);
+  border-radius: 6px;
+  background: rgba(255, 122, 26, .08);
+  pointer-events: none;
+}
+
+.wand-status {
+  margin: 8px auto 0;
+  max-width: 720px;
+  min-height: 18px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--txt-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* WYSIWYG mini-totaalbeeld */
+.wand-mini-rij {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.wand-mini {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 240px;
+  aspect-ratio: 32 / 9;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #000;
+  overflow: hidden;
+}
+.wand-mini-blok {
+  position: absolute;
+  width: 50%;
+  height: 100%;
+  transform: translate(-50%, -50%);
+  background: #000 center / cover no-repeat;
+  overflow: hidden;
+}
+.wand-mini-blok img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: center center;
+}
+
 /* ---------- scherm-preview ---------- */
 .preview-wrap {
   display: flex;

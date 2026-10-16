@@ -59,7 +59,10 @@ def _persist_cfg(cfg):
         print(f"config-schrijffout: {e}")
 
 W, H   = 1920, 1080          # per scherm
-FULL   = (W * 2, H)          # één canvas over beide schermen
+# één canvas over beide schermen; vertical-layout (boven/onder) vraagt
+# 1920x2160 — bij een layoutwijziging herstart de service (server meldt dit)
+_LAYOUT = ((CFG.get("screens", {}) or {}).get("layout", {}) or {})
+FULL   = (W, H * 2) if _LAYOUT.get("mode") == "vertical" else (W * 2, H)
 RENDER_GL = CFG.get("render_gl", True)   # False = software-fallback
 if not RENDER_GL:
     V2 = False
@@ -340,18 +343,31 @@ def window_geom(wid):
     return g
 
 def window_ok(wid):
-    """True als venster exact 3840x1080 op (0,0) staat en niet geminimaliseerd is.
-    LET OP: géén _NET_WM_STATE_FULLSCREEN — openbox interpreteert dat als
-    'vul één monitor' en resize het venster naar 1920x1080."""
+    """True als venster de verwachte layout-afmeting heeft op (0,0) en niet
+    geminimaliseerd is. Vertical-layout vraagt 1920x2160 i.p.v. 3840x1080."""
     if not wid:
         return False
     g = window_geom(wid)
     if not g:
         return False
-    ok_geom = (g.get("Width") == 3840 and g.get("Height") == 1080
+    mode = ((CFG.get("screens", {}) or {}).get("layout", {})
+            or {}).get("mode", "horizontal")
+    w_verw, h_verw = (1920, 2160) if mode == "vertical" else (3840, 1080)
+    ok_geom = (g.get("Width") == w_verw and g.get("Height") == h_verw
                and g.get("Absolute upper-left X", -1) == 0
                and g.get("Absolute upper-left Y", -1) == 0)
     return ok_geom and "Iconic" not in _win_state(wid)
+
+_venster_formaat = None    # (breedte, hoogte) volgens huidige layout
+
+def venster_formaat():
+    """Venster-afmeting volgens screens.layout (global, bij herstart nodig)."""
+    global _venster_formaat
+    if _venster_formaat is None:
+        mode = ((CFG.get("screens", {}) or {}).get("layout", {})
+                or {}).get("mode", "horizontal")
+        _venster_formaat = (1920, 2160) if mode == "vertical" else (3840, 1080)
+    return _venster_formaat
 
 def find_win_id():
     ids = _x(["xdotool", "search", "--pid", str(os.getpid())]).split()
@@ -364,7 +380,7 @@ def find_win_id():
     return ids[-1] if ids else None
 
 def enforce_window(reason):
-    """Pin venster op 0,0 3840x1080, boven-alles; log voor/na."""
+    """Pin venster op 0,0 in de layout-afmeting, boven-alles; log voor/na."""
     global _WIN_ID
     if not os.environ.get("DISPLAY"):
         return
@@ -373,11 +389,12 @@ def enforce_window(reason):
         log(f"venster-guard[{reason}]: GEEN window-id gevonden (xdotool/wmctrl aanwezig?)")
         return
     _WIN_ID = wid
+    bw, hh = venster_formaat()
     voor = f"geom={window_geom(wid)} | {_win_state(wid)[:120]}"
     _x(["xdotool", "windowactivate", wid])
-    # fullscreen-state juist WEGHALLEN: openbox maakt daar 1920x1080 van (1 monitor)
+    # fullscreen-state juist WEGHALEN: openbox maakt daar 1920x1080 van (1 monitor)
     _x(["wmctrl", "-i", "-r", wid, "-b", "remove,fullscreen"])
-    _x(["wmctrl", "-i", "-r", wid, "-e", "0,0,0,3840,1080"])
+    _x(["wmctrl", "-i", "-r", wid, "-e", f"0,0,0,{bw},{hh}"])
     _x(["wmctrl", "-i", "-r", wid, "-b", "add,above"])
     time.sleep(0.3)
     na = f"geom={window_geom(wid)}"
@@ -681,6 +698,8 @@ class Grimoria:
                       st.get("bezel", {}).get("y", 0.0)),
             "screens": {"rot0": _item(0).get("rotation", 0),
                         "rot1": _item(1).get("rotation", 0)},
+            "layout": (CFG.get("screens", {}) or {}).get("layout",
+                          {"mode": "horizontal", "swap": False}),
             "fps": (CFG.get("playback", {}) or {}).get("fps", 16),
             "reset_t0": reset,
             "overlay": overlay,

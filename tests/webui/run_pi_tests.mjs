@@ -68,7 +68,9 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     });
     await test("overlay invullen → label zichtbaar + versleepbaar", async () => {
       await page.fill("#ovl-tekst-0", "TEST123");
-      await page.locator('label:has(#ovl-aan-0) .track').click();
+      if (!(await page.locator("#ovl-aan-0").isChecked())) {
+        await page.locator('label:has(#ovl-aan-0) .track').click();
+      }
       await page.waitForSelector("#ovl-el-0:not([hidden])", { timeout: 3000 });
     });
     await test("drag&drop overlay (echte muisbeweging)", async () => {
@@ -99,10 +101,8 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       if (cfg.screens.items[0].rotation !== 270)
         throw new Error("rotatie niet gepersisteerd: " + cfg.screens.items[0].rotation);
     });
-    await test("swap-toggle bedienbaar via label (onclick)", async () => {
-      await page.locator('label:has(#scr-swap) .track').click();
-      const aan = await page.locator("#scr-swap").isChecked();
-      if (!aan) throw new Error("swap niet aangevinkt na klik");
+    await test("swap-checkbox vervangen door wand (niet meer aanwezig)", async () => {
+      if (await page.locator("#scr-swap").count()) throw new Error("scr-swap bestaat nog");
     });
 
     console.log("\n== 3. fases-tab ==");
@@ -144,6 +144,49 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
     });
     await test("lege bibliotheek toont hint/lege staat, geen crash", async () => {
       if (errs.length) throw new Error(errs[0].slice(0, 140));
+    });
+
+    console.log("\n== 4b. wand-editor ==");
+    await page.click('[role="tab"][data-tab="screens"]');
+    await test("wand-canvas met twee blokken", async () => {
+      await page.waitForSelector("#wand-canvas .wand-blok", { timeout: 4000 });
+      const n = await page.locator("#wand-canvas .wand-blok").count();
+      if (n !== 2) throw new Error(`vond ${n} blokken`);
+    });
+    await test("blok slepen naar links = horizontal+swap", async () => {
+      const blok = page.locator('.wand-blok[data-scherm="1"]');
+      const box = await blok.boundingBox();
+      const canvas = await page.locator("#wand-canvas").boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(canvas.x + canvas.width * 0.15, canvas.y + canvas.height / 2, { steps: 10 });
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      const status = await page.locator("#wand-status").textContent();
+      if (!/links|swap|gespiegeld/i.test(status)) throw new Error("status: " + status);
+    });
+    await test("layout wijziging maakt dirty", async () => {
+      if (await page.locator("#savebar").evaluate(e => e.hidden))
+        throw new Error("geen dirty na wand-sleep");
+    });
+    await test("opslaan persisteert layout", async () => {
+      await page.click("#btn-save");
+      await page.waitForFunction(
+        () => document.querySelector("#savebar")?.hidden === true, null, { timeout: 8000 });
+      const cfg = await api("/api/config");
+      const lay = cfg.screens.layout || {};
+      if (lay.mode !== "horizontal" || lay.swap !== true)
+        throw new Error("layout niet gepersisteerd: " + JSON.stringify(lay));
+    });
+    await test("rotatie via wand-sleephandgreep of presets", async () => {
+      const blok = page.locator('.wand-blok[data-scherm="0"]');
+      await blok.locator('button[data-rot="90"], .wand-rot button:first-child').first().click()
+        .catch(async () => {
+          // fallback: preset-knoppen heten mogelijk anders — probeer rot via kaart
+          await page.locator('#screens-grid .card').first().locator('[data-rot="90"]').click();
+        });
+      const rot = await page.locator("#rot-0").evaluate(el => el.dataset.val ?? el.value);
+      if (!String(rot).includes("90")) throw new Error("rotatie niet gesynchroniseerd: " + rot);
     });
 
     console.log("\n== 5. mobiele viewport (390×844, echte Pi) ==");

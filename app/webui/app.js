@@ -208,6 +208,67 @@ function gelijk(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/**
+ * Fases volledig uit de UI lezen (voor uiNaarConfig). De kaartvolgorde in
+ * de UI is leidend — herordenen/nieuw/verwijderen muteren de DOM;
+ * state.uiStates bewaart de niet-UI-velden (loop/bezel/effects) per id.
+ */
+function leesFasesVanUi() {
+  const gridEl = $("states-grid");
+  const kaarten = gridEl
+    ? [...gridEl.querySelectorAll(":scope > .card[data-fase]")]
+    : [];
+  return kaarten.map((kaart) => {
+    const id = kaart.dataset.fase;
+    const basis = (state.uiStates || []).find((s) => s.id === id) || {};
+    const st = kloon(basis);
+    st.id = id;
+    st.name = ($(`fase-naam-${id}`)?.value || "").trim() || id;
+    if (st.loop === undefined) st.loop = true;
+    st.canvas_mode = leesCanvasMode(id);
+    // alleen de velden van de ACTIEVE canvas-modus meesturen; de andere
+    // keys opruimen zodat de round-trip schoon blijft
+    if (st.canvas_mode === "wide") {
+      const sel = $(`media-${id}-wide`);
+      st.media = sel ? { wide: sel.value || "" } : {};
+    } else {
+      st.media = {
+        "0": ($(`media-${id}-0`)?.value) || "",
+        "1": ($(`media-${id}-1`)?.value) || "",
+      };
+    }
+    const adv = st.advance = {};
+    // motion-edge: alleen als de schakelaar aan EN een geldig doel gekozen is
+    // (kaarten zonder doel mogen geen lege edge achterlaten)
+    const mAan = $(`adv-motion-aan-${id}`)?.checked;
+    const mTo = $(`adv-to-${id}`)?.value || "";
+    if (mAan && mTo) {
+      const m = { to: mTo };
+      const rq = $(`adv-rq-${id}`)?.value;
+      if (rq !== undefined && rq !== "") m.require_motion_secs = num(rq);
+      const kt = $(`adv-kindto-${id}`)?.value;
+      if (kt) m.kind_to = kt;
+      const cd = $(`adv-cd-${id}`)?.value;
+      if (cd !== undefined && cd !== "") m.cooldown = num(cd);
+      const iTo = $(`adv-idle-to-${id}`)?.value;
+      if (iTo) {
+        m.idle = { to: iTo };
+        const iSecs = $(`adv-idle-secs-${id}`)?.value;
+        if (iSecs !== undefined && iSecs !== "") m.idle.still_secs = num(iSecs);
+      }
+      adv.motion = m;
+    }
+    // timeout-edge: idem — aan + secs + doel, anders geen edge
+    const tAan = $(`adv-timeout-aan-${id}`)?.checked;
+    const tsecs = $(`adv-tsecs-${id}`)?.value;
+    const tto = $(`adv-tto-${id}`)?.value;
+    if (tAan && tsecs !== undefined && tsecs !== "" && tto) {
+      adv.timeout = { secs: num(tsecs), to: tto };
+    }
+    return st;
+  });
+}
+
 /** UI → config-object (servervorm). */
 function uiNaarConfig() {
   // guard: vóór de eerste config-load is state.config nog null; kaarten
@@ -253,46 +314,9 @@ function uiNaarConfig() {
   c.timing = c.timing || {};
   c.timing.scare_cooldown = num($("tim-cooldown").value);
 
-  // per fase
-  for (const st of c.states || []) {
-    st.canvas_mode = leesCanvasMode(st.id);
-    st.media = st.media || {};
-    // alleen de velden van de ACTIEVE canvas-modus meesturen; de andere
-    // keys opruimen zodat de round-trip schoon blijft
-    if (st.canvas_mode === "wide") {
-      const sel = $(`media-${st.id}-wide`);
-      st.media = sel ? { wide: sel.value || "" } : {};
-    } else {
-      st.media = {
-        "0": ($(`media-${st.id}-0`)?.value) || "",
-        "1": ($(`media-${st.id}-1`)?.value) || "",
-      };
-    }
-    const adv = st.advance = st.advance || {};
-    // motion-edge alleen als er een geldig doel is (kaarten zonder motion-
-    // velden mogen geen lege edge achterlaten)
-    const toEl = $(`adv-to-${st.id}`);
-    const to = toEl ? (toEl.value || "") : "";
-    if (to) {
-      const m = { to };
-      const rqEl = $(`adv-rq-${st.id}`);
-      if (rqEl && rqEl.value !== "") m.require_motion_secs = num(rqEl.value);
-      const cdEl = $(`adv-cd-${st.id}`);
-      if (cdEl && cdEl.value !== "") m.cooldown = num(cdEl.value);
-      adv.motion = m;
-    } else {
-      delete adv.motion;
-    }
-    const tsecs = $(`adv-tsecs-${st.id}`);
-    const tto = $(`adv-tto-${st.id}`);
-    if (tsecs && tto) {
-      adv.timeout = tsecs.value === "" || tto.value === ""
-        ? null
-        : { secs: num(tsecs.value), to: tto.value };
-    } else if (adv.timeout === undefined) {
-      adv.timeout = null;
-    }
-  }
+  // per fase — de kaartvolgorde in de UI is leidend (herordenen/nieuw/verwijder
+  // muteren de DOM; state.uiStates bewaart de niet-UI-velden zoals bezel/effects)
+  c.states = leesFasesVanUi();
   return c;
 }
 
@@ -346,24 +370,12 @@ function configNaarUi() {
   $("tim-conf").value = num(c.motion?.person_conf, 0.5);
   $("tim-cooldown").value = num(c.timing?.scare_cooldown, 90);
 
-  for (const st of c.states || []) {
-    zetCanvasMode(st.id, st.canvas_mode === "wide" ? "wide" : "split");
-    const med = st.media || {};
-    for (const k of ["0", "1", "wide"]) {
-      const sel = $(`media-${st.id}-${k}`);
-      if (sel) sel.value = med[k] || "";
-    }
-    const m = st.advance?.motion || {};
-    const toEl = $(`adv-to-${st.id}`);
-    if (toEl) toEl.value = m.to || "";
-    const rqEl = $(`adv-rq-${st.id}`);
-    if (rqEl) rqEl.value = m.require_motion_secs ?? "";
-    const cdEl = $(`adv-cd-${st.id}`);
-    if (cdEl) cdEl.value = m.cooldown ?? "";
-    const t = st.advance?.timeout;
-    $(`adv-tsecs-${st.id}`).value = t ? (t.secs ?? "") : "";
-    $(`adv-tto-${st.id}`).value = t ? (t.to || "") : "";
-  }
+  // fase-kaarten herbouwen (states kunnen gewijzigd zijn), daarna de
+  // kaartvelden zetten; de niet-UI-velden (bezel/effects/loop) leven in
+  // state.uiStates en blijven zo behouden bij het opslaan.
+  // bouwFaseKaarten() zet zelf alle kaartwaarden + schema.
+  syncUiStates();
+  bouwFaseKaarten();
   zetDirty(false);
 }
 
@@ -951,7 +963,9 @@ function mediaOpties(canvasMode, geselecteerd) {
 
 /** canvas_mode-radio's lezen/schrijven (radio's hebben een name, geen id). */
 function leesCanvasMode(st_id) {
-  for (const r of $(`cm-groep-${st_id}`).querySelectorAll("input")) {
+  const groep = $(`cm-groep-${st_id}`);
+  if (!groep) return "split";
+  for (const r of groep.querySelectorAll("input")) {
     if (r.checked) return r.value;
   }
   return "split";
@@ -963,139 +977,673 @@ function zetCanvasMode(st_id, mode) {
   }
 }
 
-/** Bouw de fase-kaarten (opnieuw bij Bibliotheek-wijziging of canvas_mode-wissel). */
-function bouwFaseKaarten() {
-  const grid = $("states-grid");
-  grid.innerHTML = "";
-  const states = state.config?.states || [];
+/* ---------- layout-voorkeur (verticaal/horizontaal) ---------- */
 
-  for (const st of states) {
-    const kaart = document.createElement("fieldset");
-    kaart.className = "card";
-    const med = st.media || {};
-    const m = st.advance?.motion || {};
-    const t = st.advance?.timeout;
+const FASE_LAYOUT_KEY = "grimoria-fase-layout";
 
-    // motion-kolom alleen tonen als deze fase een motion-overgang heeft
-    const motionVelden = m.to !== undefined || st.id === "rust" || st.id === "langzaam" ? `
-        <label class="field inline">Bij beweging →
-          <select id="adv-to-${esc(st.id)}"></select>
-        </label>
-        <label class="field inline">Vereist beweging (s)
-          <input type="number" id="adv-rq-${esc(st.id)}" min="0" step="0.5" value="${m.require_motion_secs ?? ""}">
-        </label>
-        <label class="field inline">Cooldown (s)
-          <input type="number" id="adv-cd-${esc(st.id)}" min="0" step="1" value="${m.cooldown ?? ""}">
-        </label>` : "";
-
-    kaart.innerHTML = `
-      <legend>Fase</legend>
-      <div class="fase-header">
-        <h3>${esc(st.name || st.id)}</h3>
-        <span class="fase-id">id: ${esc(st.id)}</span>
-        <label class="field inline">Canvas-modus
-          <span class="row" id="cm-groep-${esc(st.id)}">
-            <label class="radio"><input type="radio" name="cm-${esc(st.id)}" value="split"> split</label>
-            <label class="radio"><input type="radio" name="cm-${esc(st.id)}" value="wide"> wide</label>
-          </span>
-        </label>
-        <button type="button" class="btn btn-klein" data-goto="${esc(st.id)}" title="Zet de machine direct in deze fase">▶ naar deze fase</button>
-      </div>
-      <div class="fase-media-rij">
-        <label class="field inline">Film Scherm 1
-          <select id="media-${esc(st.id)}-0">${mediaOpties("split", med["0"])}</select>
-        </label>
-        <label class="field inline">Film Scherm 2
-          <select id="media-${esc(st.id)}-1">${mediaOpties("split", med["1"])}</select>
-        </label>
-        <label class="field inline" id="media-wide-rij-${esc(st.id)}" hidden>Breed-canvas film
-          <select id="media-${esc(st.id)}-wide">${mediaOpties("wide", med.wide)}</select>
-        </label>
-      </div>
-      <div class="row timing-rij">
-        ${motionVelden}
-        <label class="field inline">Timeout (s)
-          <input type="number" id="adv-tsecs-${esc(st.id)}" min="0" step="0.5" value="${t ? (t.secs ?? "") : ""}">
-        </label>
-        <label class="field inline">Timeout →
-          <select id="adv-tto-${esc(st.id)}"></select>
-        </label>
-      </div>`;
-    grid.appendChild(kaart);
-
-    // canvas_mode-radio's zetten vanuit config
-    const mode = st.canvas_mode === "wide" ? "wide" : "split";
-    zetCanvasMode(st.id, mode);
-
-    // wissel van canvas_mode → scherm-dropdowns en wide-rij bijwerken
-    for (const radio of kaart.querySelectorAll(`input[name="cm-${CSS.escape(st.id)}"]`)) {
-      radio.addEventListener("change", () => {
-        const wide = radio.value === "wide" && radio.checked;
-        $(`media-wide-rij-${st.id}`).hidden = !wide;
-        $("media-" + st.id + "-0").closest(".field.inline").hidden = wide;
-        $("media-" + st.id + "-1").closest(".field.inline").hidden = wide;
-        if (wide) {
-          $(`media-${st.id}-wide`).innerHTML = mediaOpties("wide", $(`media-${st.id}-wide`).value);
-        } else {
-          const cur0 = $(`media-${st.id}-0`).value, cur1 = $(`media-${st.id}-1`).value;
-          $(`media-${st.id}-0`).innerHTML = mediaOpties("split", cur0);
-          $(`media-${st.id}-1`).innerHTML = mediaOpties("split", cur1);
-        }
-        checkOpslaan();
-      });
-    }
-    // beginstatus toepassen (zonder event)
-    if (mode === "wide") {
-      $(`media-wide-rij-${st.id}`).hidden = false;
-      $("media-" + st.id + "-0").closest(".field.inline").hidden = true;
-      $("media-" + st.id + "-1").closest(".field.inline").hidden = true;
-    } else {
-      $(`media-wide-rij-${st.id}`).hidden = true;
-    }
-
-    // goto-knop
-    kaart.querySelector(`[data-goto="${CSS.escape(st.id)}"]`).addEventListener("click", async () => {
-      try {
-        await postGoto(st.id);
-        toast(`Gaat naar fase "${st.name || st.id}"`);
-      } catch (e) {
-        toast("Naar fase gaan mislukt: " + e.message, "err");
-      }
-    });
-  }
-
-  vulStateDropdowns();
-  koppelFaseEvents();
+function leesFaseLayout() {
+  return localStorage.getItem(FASE_LAYOUT_KEY) === "horizontaal" ? "horizontaal" : "verticaal";
 }
 
-/** motion.to- en timeout.to-dropdowns vullen met staten. */
-function vulStateDropdowns() {
+function zetFaseLayout(modus) {
+  const grid = $("states-grid");
+  if (grid) grid.dataset.layout = modus;
+  for (const [m, knop] of [["verticaal", $("fase-layout-verticaal")],
+                           ["horizontaal", $("fase-layout-horizontaal")]]) {
+    if (knop) {
+      knop.classList.toggle("active", m === modus);
+      knop.setAttribute("aria-pressed", String(m === modus));
+    }
+  }
+}
+
+/* ---------- niet-UI-velden per fase (loop/bezel/effects) ---------- */
+
+/**
+ * Houd state.uiStates bij als bron voor velden zonder UI-besturing:
+ * loop, bezel, effects en eventueel de advance-vorm van states zonder
+ * kaart. Wordt gesynchroniseerd bij config-load, save en discard.
+ */
+function syncUiStates(bron = state.config) {
+  const uit = [];
+  for (const st of bron?.states || []) {
+    uit.push({
+      id: st.id,
+      ...(st.loop !== undefined ? { loop: st.loop } : {}),
+      ...(st.bezel ? { bezel: kloon(st.bezel) } : {}),
+      ...(st.effects ? { effects: kloon(st.effects) } : {}),
+    });
+  }
+  state.uiStates = uit;
+}
+
+/* ---------- kaartvolgorde + ids ---------- */
+
+/** fase-ids in UI-volgorde (uit de kaarten in #states-grid). */
+function faseIdsVanUi() {
+  const gridEl = $("states-grid");
+  if (!gridEl) return [];
+  return [...gridEl.querySelectorAll(":scope > .card[data-fase]")]
+    .map((k) => k.dataset.fase);
+}
+
+/** Nog vrije fase-id: slug van de naam, anders fase-N (eerst vrije N). */
+function nieuweFaseId(naam) {
+  const bezet = new Set(faseIdsVanUi());
+  let slug = String(naam || "").toLowerCase()
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  if (slug && !bezet.has(slug)) return slug;
+  let n = 1;
+  while (bezet.has(`fase-${n}`)) n++;
+  return `fase-${n}`;
+}
+
+/**
+ * Bouw de fase-kaarten volledig opnieuw (initiële load, save, revert).
+ * Waarden komen uit state.config.states; niet-UI-velden staan in
+ * state.uiStates. Select-waarden worden ná vulStateDropdowns gezet.
+ */
+function bouwFaseKaarten() {
+  const grid = $("states-grid");
+  if (!grid) return;
   const states = state.config?.states || [];
+  grid.innerHTML = "";
   for (const st of states) {
-    const to = $(`adv-to-${st.id}`);
-    const tto = $(`adv-tto-${st.id}`);
-    for (const sel of [to, tto]) {
+    grid.appendChild(bouwFaseKaart({
+      id: st.id,
+      naam: st.name || st.id,
+      canvas_mode: st.canvas_mode,
+      media: st.media || {},
+      motion: st.advance?.motion || null,
+      timeout: st.advance?.timeout || null,
+    }));
+  }
+  // pas nu de kaarten in het DOM hangen: waarden zetten + events koppelen
+  vulStateDropdowns();
+  for (const st of states) {
+    zetCanvasMode(st.id, st.canvas_mode === "wide" ? "wide" : "split");
+    koppelFaseKaart(grid.querySelector(`:scope > .card[data-fase="${CSS.escape(st.id)}"]`), st.id);
+    zetKaartWaarden(st);
+  }
+  tekenKetenSchema();
+}
+
+/**
+ * Eén fase-kaart-element bouwen: structuur + statische defaults + events.
+ * Select-waarden (adv-*) worden pas geldig na vulStateDropdowns(); zet ze
+ * via zetKaartWaarden() (gedaan door bouwFaseKaarten).
+ */
+function bouwFaseKaart(w, idx) {
+  const st = Object.assign({ id: w.id }, w);   // compat: veldtoegang via st.
+  const med = st.media || {};
+  const m = st.motion || {};
+  const t = st.timeout;
+
+  const kaart = document.createElement("fieldset");
+  kaart.className = "card fase-kaart";
+  kaart.dataset.fase = st.id;
+  kaart.innerHTML = `
+    <div class="fase-header">
+      <span class="fase-grip" title="Fase verslepen om te herordenen (of Alt+pijl op de kaart)">⠿</span>
+      <div class="fase-titel">
+        <input type="text" class="fase-naam" id="fase-naam-${esc(st.id)}" value="${esc(st.name ?? st.id)}" maxlength="60" aria-label="Fasenaam">
+        <span class="fase-id" id="fase-id-${esc(st.id)}">id: ${esc(st.id)}</span>
+      </div>
+      <label class="field inline">Canvas-modus
+        <span class="row" id="cm-groep-${esc(st.id)}">
+          <label class="radio"><input type="radio" name="cm-${esc(st.id)}" value="split"> split</label>
+          <label class="radio"><input type="radio" name="cm-${esc(st.id)}" value="wide"> wide</label>
+        </span>
+      </label>
+      <button type="button" class="btn btn-klein" data-goto="${esc(st.id)}" title="Zet de machine direct in deze fase">▶</button>
+      <button type="button" class="btn btn-klein btn-danger fase-del" data-del-fase="${esc(st.id)}" title="Deze fase verwijderen">🗑</button>
+    </div>
+    <div class="fase-media-rij">
+      <label class="field inline">Film Scherm 1
+        <select id="media-${esc(st.id)}-0">${mediaOpties("split", med["0"])}</select>
+      </label>
+      <label class="field inline">Film Scherm 2
+        <select id="media-${esc(st.id)}-1">${mediaOpties("split", med["1"])}</select>
+      </label>
+      <label class="field inline" id="media-wide-rij-${esc(st.id)}" hidden>Breed-canvas film
+        <select id="media-${esc(st.id)}-wide">${mediaOpties("wide", med.wide)}</select>
+      </label>
+    </div>
+    <div class="edge-regels">
+      <div class="edge-regel">
+        <label class="switch" title="Overgang bij beweging aan/uit">
+          <input type="checkbox" id="adv-motion-aan-${esc(st.id)}"><span class="track"></span>
+        </label>
+        <span class="edge-label">Bij beweging →</span>
+        <select id="adv-to-${esc(st.id)}" class="edge-doel"></select>
+        <button type="button" class="btn btn-klein edge-extra-knop" data-extra="${esc(st.id)}" aria-expanded="false" title="Extra bewegings-instellingen">⋯</button>
+      </div>
+      <div class="edge-extra" id="edge-extra-${esc(st.id)}" hidden>
+        <label class="field inline">persoon aanwezig
+          <input type="number" id="adv-rq-${esc(st.id)}" min="0" step="0.5" value="${m.require_motion_secs ?? ""}" placeholder="—"> s
+        </label>
+        <label class="field inline">in kind-modus →
+          <select id="adv-kindto-${esc(st.id)}" class="edge-doel"></select>
+        </label>
+        <label class="field inline">cooldown
+          <input type="number" id="adv-cd-${esc(st.id)}" min="0" step="1" value="${m.cooldown ?? ""}" placeholder="—"> s
+        </label>
+        <div class="edge-subregel" id="edge-idle-rij-${esc(st.id)}">
+          <span class="edge-label">als beweging stopt →</span>
+          <select id="adv-idle-to-${esc(st.id)}" class="edge-doel"></select>
+          <label class="field inline">na
+            <input type="number" id="adv-idle-secs-${esc(st.id)}" min="0" step="0.5" value="${m.idle?.still_secs ?? ""}" placeholder="—"> s
+          </label>
+        </div>
+      </div>
+      <div class="edge-regel">
+        <label class="switch" title="Timeout-overgang aan/uit">
+          <input type="checkbox" id="adv-timeout-aan-${esc(st.id)}"><span class="track"></span>
+        </label>
+        <span class="edge-label">Na</span>
+        <input type="number" id="adv-tsecs-${esc(st.id)}" min="0" step="0.5" value="${t ? (t.secs ?? "") : ""}" class="edge-secs"> s
+        <span class="edge-label">→</span>
+        <select id="adv-tto-${esc(st.id)}" class="edge-doel"></select>
+      </div>
+    </div>`;
+
+  return kaart;   // nog niet gekoppeld: gebeurt na appendChild (ids zijn
+                  // pas via getElementById vindbaar als de kaart in het DOM zit)
+}
+
+/**
+ * Alle velden van één kaart zetten vanuit een config-vormige state
+ * ({id, name, canvas_mode, media, advance:{motion, timeout}}). Na het
+ * bouwen (selects hebben dan opties via vulStateDropdowns).
+ */
+function zetKaartWaarden(st) {
+  const id = st.id;
+  const naamEl = $(`fase-naam-${id}`);
+  if (naamEl) naamEl.value = st.name || st.id;
+  const med = st.media || {};
+  for (const k of ["0", "1", "wide"]) {
+    const sel = $(`media-${id}-${k}`);
+    if (sel) sel.value = med[k] || "";
+  }
+  const mode = st.canvas_mode === "wide" ? "wide" : "split";
+  zetCanvasMode(id, mode);
+  pasCanvasModeToe(id, mode === "wide");
+
+  const m = st.advance?.motion || {};
+  const t = st.advance?.timeout;
+  if ($(`adv-motion-aan-${id}`)) $(`adv-motion-aan-${id}`).checked = !!m.to;
+  const toEl = $(`adv-to-${id}`);
+  if (toEl) toEl.value = m.to || "";
+  const rqEl = $(`adv-rq-${id}`);
+  if (rqEl) rqEl.value = m.require_motion_secs ?? "";
+  const ktEl = $(`adv-kindto-${id}`);
+  if (ktEl) ktEl.value = m.kind_to || "";
+  const cdEl = $(`adv-cd-${id}`);
+  if (cdEl) cdEl.value = m.cooldown ?? "";
+  const iToEl = $(`adv-idle-to-${id}`);
+  if (iToEl) iToEl.value = m.idle?.to || "";
+  const iSecsEl = $(`adv-idle-secs-${id}`);
+  if (iSecsEl) iSecsEl.value = m.idle?.still_secs ?? "";
+  if ($(`adv-timeout-aan-${id}`)) $(`adv-timeout-aan-${id}`).checked = !!t;
+  const tsEl = $(`adv-tsecs-${id}`);
+  if (tsEl) tsEl.value = t ? (t.secs ?? "") : "";
+  const ttEl = $(`adv-tto-${id}`);
+  if (ttEl) ttEl.value = t ? (t.to || "") : "";
+  zetEdgeZichtbaarheid(id);
+}
+
+/** Media-velden tonen naar aanleiding van de canvas-modus. */
+function pasCanvasModeToe(id, wide) {
+  const rij = $(`media-wide-rij-${id}`);
+  if (!rij) return;
+  rij.hidden = !wide;
+  const f0 = $("media-" + id + "-0")?.closest(".field.inline");
+  const f1 = $("media-" + id + "-1")?.closest(".field.inline");
+  if (f0) f0.hidden = wide;
+  if (f1) f1.hidden = wide;
+}
+
+/** Events koppelen op één kaart (structuur staat al in het DOM). */
+function koppelFaseKaart(kaart, id) {
+  // canvas_mode-wissel → scherm-dropdowns en wide-rij bijwerken
+  for (const radio of kaart.querySelectorAll(`input[name="cm-${CSS.escape(id)}"]`)) {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      const wide = radio.value === "wide";
+      if (wide) {
+        $(`media-${id}-wide`).innerHTML = mediaOpties("wide", $(`media-${id}-wide`).value);
+      } else {
+        const cur0 = $(`media-${id}-0`).value, cur1 = $(`media-${id}-1`).value;
+        $(`media-${id}-0`).innerHTML = mediaOpties("split", cur0);
+        $(`media-${id}-1`).innerHTML = mediaOpties("split", cur1);
+      }
+      pasCanvasModeToe(id, wide);
+      checkOpslaan();
+    });
+  }
+  pasCanvasModeToe(id, leesCanvasMode(id) === "wide");
+
+  // naam wijzigen → dirty + verwijzingen (dropdowns/schema) live verversen
+  $(`fase-naam-${id}`).addEventListener("input", () => {
+    checkOpslaan();
+    vulStateDropdowns();
+    tekenKetenSchema();
+  });
+
+  // edge-aan/uit → velden in/uitschakelen + dirty
+  for (const soort of ["motion", "timeout"]) {
+    $(`adv-${soort}-aan-${id}`).addEventListener("change", () => {
+      zetEdgeZichtbaarheid(id);
+      checkOpslaan();
+      tekenKetenSchema();
+    });
+  }
+  zetEdgeZichtbaarheid(id);
+
+  // uitklapbare extra's (⋯)
+  const extraKnop = kaart.querySelector(`.edge-extra-knop[data-extra="${CSS.escape(id)}"]`);
+  const zetExtraOpen = (open) => {
+    const paneel = $(`edge-extra-${id}`);
+    if (!paneel) return;
+    paneel.hidden = !open;
+    extraKnop.setAttribute("aria-expanded", String(open));
+    extraKnop.classList.toggle("active", open);
+  };
+  extraKnop.addEventListener("click", () => zetExtraOpen($(`edge-extra-${id}`).hidden));
+  // bij het aanzetten van motion: extra's meteen openen als er al waarden
+  // in staan (of altijd bij een NIEUWE fase, zodat alles vindbaar is)
+  $(`adv-motion-aan-${id}`).addEventListener("change", () => {
+    // beweging aan = extra-instellingen meteen tonen (hold/kind/cooldown/stil);
+    // gebruiker kan ze altijd inclappen via ⋯
+    if ($(`adv-motion-aan-${id}`).checked) zetExtraOpen(true);
+  });
+
+  // edge-velden → dirty + schema live
+  for (const veld of [`adv-to-${id}`, `adv-rq-${id}`, `adv-kindto-${id}`, `adv-cd-${id}`,
+                      `adv-idle-to-${id}`, `adv-idle-secs-${id}`,
+                      `adv-tsecs-${id}`, `adv-tto-${id}`]) {
+    $(veld).addEventListener("change", () => { checkOpslaan(); tekenKetenSchema(); });
+  }
+  for (const veld of [`media-${id}-0`, `media-${id}-1`, `media-${id}-wide`]) {
+    $(veld).addEventListener("change", checkOpslaan);
+  }
+
+  // ▶ testknop
+  kaart.querySelector(`[data-goto="${CSS.escape(id)}"]`).addEventListener("click", async () => {
+    const st = leesFasesVanUi().find((s) => s.id === id);
+    try {
+      await postGoto(id);
+      toast(`Gaat naar fase "${st?.name || id}"`);
+    } catch (e) {
+      toast("Naar fase gaan mislukt: " + e.message, "err");
+    }
+  });
+
+  // 🗑 verwijderen
+  kaart.querySelector(`[data-del-fase="${CSS.escape(id)}"]`).addEventListener("click", () => {
+    verwijderFase(id);
+  });
+
+  // herordenen: sleep de grip (pointer events) + alt+pijl op de kaart
+  koppelFaseDrag(kaart, id);
+  kaart.addEventListener("keydown", (e) => faseToets(id, e));
+  kaart.tabIndex = 0;
+  return kaart;
+}
+
+/** motion/timeout-velden enable/disable naar de aan-standen. */
+function zetEdgeZichtbaarheid(id) {
+  const mAan = $(`adv-motion-aan-${id}`)?.checked;
+  const tAan = $(`adv-timeout-aan-${id}`)?.checked;
+  for (const veld of ["adv-to", "adv-rq", "adv-kindto", "adv-cd",
+                      "adv-idle-to", "adv-idle-secs"]) {
+    const el = $(`${veld}-${id}`);
+    if (el) el.disabled = !mAan;
+  }
+  const extra = $(`edge-extra-${id}`);
+  if (extra && !mAan) {
+    extra.hidden = true;
+    const knop = document.querySelector(`.edge-extra-knop[data-extra="${CSS.escape(id)}"]`);
+    if (knop) { knop.setAttribute("aria-expanded", "false"); knop.classList.remove("active"); }
+  }
+  const idleRij = $(`edge-idle-rij-${id}`);
+  if (idleRij) idleRij.classList.toggle("uit", !mAan);
+  for (const veld of ["adv-tsecs", "adv-tto"]) {
+    const el = $(`${veld}-${id}`);
+    if (el) el.disabled = !tAan;
+  }
+  const mr = $(`adv-motion-aan-${id}`)?.closest(".edge-regel");
+  if (mr) mr.classList.toggle("edge-uit", !mAan);
+  const tr = $(`adv-timeout-aan-${id}`)?.closest(".edge-regel");
+  if (tr) tr.classList.toggle("edge-uit", !tAan);
+}
+
+/** Alt+pijl: gefocuste kaart verplaatsen (omhoog/omlaag; in horizontale
+ *  modus ook links/rechts). */
+function faseToets(id, e) {
+  if (!e.altKey) return;
+  const horizontaal = leesFaseLayout() === "horizontaal";
+  const map = horizontaal
+    ? { ArrowLeft: -1, ArrowRight: 1 }
+    : { ArrowUp: -1, ArrowDown: 1 };
+  if (!(e.key in map)) return;
+  e.preventDefault();
+  const ids = faseIdsVanUi();
+  const van = ids.indexOf(id);
+  const naar = van + map[e.key];
+  if (van < 0 || naar < 0 || naar >= ids.length) return;
+  verplaatsFase(id, naar);
+}
+
+/**
+ * Fase-kaart verplaatsen naar index `naar` (0-gebaseerd) en alles
+ * verversen wat van de volgorde afhangt. Richt de drop-focus op de kaart.
+ */
+function verplaatsFase(id, naar, focusKaart = true) {
+  const grid = $("states-grid");
+  const kaart = grid.querySelector(`:scope > .card[data-fase="${CSS.escape(id)}"]`);
+  if (!kaart) return;
+  const broers = [...grid.querySelectorAll(":scope > .card[data-fase]")];
+  const van = broers.indexOf(kaart);
+  if (van < 0) return;
+  naar = Math.max(0, Math.min(broers.length - 1, naar));
+  if (naar === van) return;
+  broers.splice(van, 1);
+  const ref = broers[naar] || null;                 // kaart die er nu op `naar` staat
+  if (naar === broers.length) grid.appendChild(kaart);
+  else grid.insertBefore(kaart, ref);
+  checkOpslaan();
+  tekenKetenSchema();
+  if (focusKaart) kaart.focus();
+}
+
+/* ---------- drag & drop herordenen ---------- */
+
+const faseDrag = {
+  actief: null,   // {id, kaart, pointerId}
+};
+
+/** Sleep de grip van een kaart naar een andere positie (pointer events). */
+function koppelFaseDrag(kaart, id) {
+  const grip = kaart.querySelector(".fase-grip");
+  if (!grip) return;
+
+  const start = (e) => {
+    if (faseDrag.actief) return;
+    e.preventDefault();
+    faseDrag.actief = { id, kaart, pointerId: e.pointerId };
+    kaart.classList.add("sleep");
+    try { grip.setPointerCapture(e.pointerId); } catch { /* synthetisch event */ }
+    const rect = kaart.getBoundingClientRect();
+    faseDrag.greep = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    faseDrag.pointerBeweeg = false;
+    faseDragLaat(e);                       // indicator meteen goed zetten
+  };
+
+  grip.addEventListener("pointerdown", start);
+  grip.addEventListener("pointermove", (e) => {
+    if (!faseDrag.actief || e.pointerId !== faseDrag.actief.pointerId) return;
+    faseDrag.pointerBeweeg = true;
+    faseDragLaat(e);
+  });
+  const einde = (e) => {
+    if (!faseDrag.actief || e.pointerId !== faseDrag.actief.pointerId) return;
+    const { id: sid, kaart: sk } = faseDrag.actief;
+    faseDrag.actief = null;
+    sk.classList.remove("sleep");
+    try { grip.releasePointerCapture(e.pointerId); } catch { /* al los */ }
+    const doel = faseDragDoel;
+    faseDragVerwijderIndicator();
+    if (doel && faseDrag.pointerBeweeg && doel.id !== sid) {
+      verplaatsFase(sid, doel.index, false);
+    } else {
+      checkOpslaan();
+    }
+  };
+  grip.addEventListener("pointerup", einde);
+  grip.addEventListener("pointercancel", einde);
+}
+
+/** Huidige drop-positie bepalen uit de pointer-positie (midden vd kaart). */
+function faseDragLaat(e) {
+  const grid = $("states-grid");
+  const horizontaal = leesFaseLayout() === "horizontaal";
+  const kaarten = [...grid.querySelectorAll(":scope > .card[data-fase]")];
+  const cx = e.clientX - (faseDrag.greep?.dx ?? 0);
+  const cy = e.clientY - (faseDrag.greep?.dy ?? 0);
+  const rects = kaarten.map((k) => k.getBoundingClientRect());
+  let index = kaarten.length - 1;           // default: helemaal onderaan
+  let id = kaarten[kaarten.length - 1]?.dataset.fase;
+  for (let i = 0; i < rects.length; i++) {
+    if (horizontaal ? cx < rects[i].left + rects[i].width / 2
+                    : cy < rects[i].top + rects[i].height / 2) {
+      index = i;
+      id = kaarten[i].dataset.fase;
+      break;
+    }
+  }
+  faseDragDoel = { index, id };
+  faseDragTekenIndicator(index);
+}
+
+/** Visuele drop-indicator (lijn tussen kaarten) op index-positie. */
+function faseDragTekenIndicator(index) {
+  faseDragVerwijderIndicator();
+  const grid = $("states-grid");
+  const kaarten = [...grid.querySelectorAll(":scope > .card[data-fase]")];
+  if (!kaarten.length) return;
+  const ref = kaarten[index];
+  const lijn = document.createElement("div");
+  lijn.className = "fase-drop-lijn";
+  lijn.dataset.index = String(index);
+  if (index >= kaarten.length) grid.appendChild(lijn);
+  else grid.insertBefore(lijn, ref);
+}
+
+function faseDragVerwijderIndicator() {
+  document.querySelectorAll(".fase-drop-lijn").forEach((l) => l.remove());
+}
+
+let faseDragDoel = null;   // {index, id} tijdens een sleep
+
+/* ---------- nieuwe fase / verwijderen / keten ---------- */
+
+/** + Nieuwe fase: kaart onderaan toevoegen en de naam focussen. */
+function nieuweFase() {
+  const grid = $("states-grid");
+  if (!grid) return;
+  syncUiStatesVanUi();
+  const id = nieuweFaseId("Nieuwe fase");
+  state.uiStates.push({ id, loop: true });
+  grid.appendChild(bouwFaseKaart({
+    id, naam: "Nieuwe fase", canvas_mode: "split",
+    media: { "0": "", "1": "", wide: "" },
+    motion: null, timeout: null,
+  }));
+  zetCanvasMode(id, "split");
+  koppelFaseKaart(grid.querySelector(`:scope > .card[data-fase="${CSS.escape(id)}"]`), id);
+  vulStateDropdowns();
+  tekenKetenSchema();
+  checkOpslaan();
+  const naam = $(`fase-naam-${id}`);
+  // naar het midden scrollen: onder de sticky statusbar is de kaart niet
+  // aanklikbaar/sleepbaar
+  grid.querySelector(`:scope > .card[data-fase="${CSS.escape(id)}"]`)
+    ?.scrollIntoView({ block: "center" });
+  naam.focus();
+  naam.select();
+  toast(`Fase "${id}" toegevoegd — geef hem een naam`);
+}
+
+/** uiStates.actualiseren met de actuele UI-waarden (vóór een mutatie). */
+function syncUiStatesVanUi() {
+  const fases = leesFasesVanUi();
+  const perId = new Map(fases.map((s) => [s.id, s]));
+  state.uiStates = faseIdsVanUi().map((id) => {
+    const st = perId.get(id) || { id };
+    const uit = { id };
+    if (st.loop !== undefined) uit.loop = st.loop;
+    if (st.bezel) uit.bezel = kloon(st.bezel);
+    if (st.effects) uit.effects = kloon(st.effects);
+    return uit;
+  });
+}
+
+/** Fase verwijderen (met confirm; laatste fase weigeren; doorverwijzingen melden). */
+function verwijderFase(id) {
+  const ids = faseIdsVanUi();
+  if (ids.length <= 1) {
+    toast("Minstens één fase is verplicht — verwijderen geweigerd", "err");
+    return;
+  }
+  const fases = leesFasesVanUi();
+  const slachtoffer = fases.find((s) => s.id === id);
+  const verwijzingen = [];
+  for (const s of fases) {
+    if (s.id === id) continue;
+    const m = s.advance?.motion, t = s.advance?.timeout;
+    if (m?.to === id) verwijzingen.push(`Beweging → ${naamVanFase(id)} vervalt (${s.name})`);
+    if (m?.kind_to === id) verwijzingen.push(`Kind-doel → ${naamVanFase(id)} vervalt (${s.name})`);
+    if (m?.idle?.to === id) verwijzingen.push(`Bij stilte → ${naamVanFase(id)} vervalt (${s.name})`);
+    if (t?.to === id) verwijzingen.push(`Timeout → ${naamVanFase(id)} vervalt (${s.name})`);
+  }
+  let bericht = `Fase "${slachtoffer?.name || id}" verwijderen?`;
+  if (verwijzingen.length) bericht += "\n\n" + verwijzingen.join("\n");
+  if ($("ph-entry").value === id) bericht += `\n\nDe startfase wordt ${naamVanFase(fases.find((s) => s.id !== id)?.id)} (eerste overgebleven fase).`;
+  if (!confirm(bericht)) return;
+
+  syncUiStatesVanUi();
+  state.uiStates = state.uiStates.filter((s) => s.id !== id);
+  const grid = $("states-grid");
+  grid.querySelector(`:scope > .card[data-fase="${CSS.escape(id)}"]`)?.remove();
+  // entry_state kan naar een verdwenen fase wijzen → eerste overgebleven fase
+  // (pas na de save echt; revert herbouwt alles vanuit de originele config)
+  if (!$("ph-entry").value || !faseIdsVanUi().includes($("ph-entry").value)) {
+    $("ph-entry").value = faseIdsVanUi()[0] || "";
+  }
+  vulStateDropdowns();
+  tekenKetenSchema();
+  checkOpslaan();
+  toast(`Fase "${slachtoffer?.name || id}" verwijderd — nog opslaan!`);
+}
+
+/** Weergavenaam van een fase-id (uit de UI-kaarten). */
+function naamVanFase(id) {
+  const el = $(`fase-naam-${id}`);
+  if (el && el.value.trim()) return el.value.trim();
+  const st = (state.uiStates || []).find((s) => s.id === id);
+  return st?.name || id;
+}
+
+/** Verbind als keten: timeout-edges langs de kaartvolgorde, laatste → entry. */
+function verbindKeten() {
+  const ids = faseIdsVanUi();
+  if (ids.length < 2) {
+    toast("Een keten heeft minstens twee fases nodig", "err");
+    return;
+  }
+  if (!confirm("Alle timeout-overgangen worden herschreven naar één keten " +
+    "langs de volgorde van de kaarten. Doorgaan?")) return;
+  const entry = ids[ids.length - 1];   // laatste kaart wordt de entry (lus terug)
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const doel = i + 1 < ids.length ? ids[i + 1] : entry;
+    // ph-entry meezetten zodat de save de nieuwe entry bevat
+    if ($("ph-entry")) $("ph-entry").value = entry;
+    const secs = $(`adv-tsecs-${id}`);
+    const aan = $(`adv-timeout-aan-${id}`);
+    const tto = $(`adv-tto-${id}`);
+    if (!secs || !aan || !tto) continue;
+    const huidig = secs.value;
+    aan.checked = true;
+    if (huidig === "" || huidig === undefined || num(huidig, 0) <= 0) {
+      secs.value = "10";
+    }
+    tto.value = doel;
+    zetEdgeZichtbaarheid(id);
+  }
+  checkOpslaan();
+  tekenKetenSchema();
+  toast(`Keten verbonden: ${ids.map(naamVanFase).join(" → ")} → ${naamVanFase(entry)}`);
+}
+
+/** motion.to-/kind_to/idle.to- en timeout.to-dropdowns vullen met staten. */
+function vulStateDropdowns() {
+  const ids = faseIdsVanUi();
+  for (const id of ids) {
+    for (const veld of ["adv-to", "adv-kindto", "adv-idle-to", "adv-tto"]) {
+      const sel = $(`${veld}-${id}`);
       if (!sel) continue;
       const cur = sel.value;
       sel.innerHTML = `<option value="">— geen —</option>` +
-        states.map((s) => `<option value="${esc(s.id)}"${s.id === cur ? " selected" : ""}>${esc(s.name || s.id)}</option>`).join("");
+        ids.map((s) => `<option value="${esc(s)}"${s === cur ? " selected" : ""}>${esc(naamVanFase(s))}</option>`).join("");
     }
+  }
+  // entry-dropdown (ph-entry) via vulEntryDropdown (ids + namen)
+  const entry = $("ph-entry");
+  if (entry) {
+    const cur = entry.value;
+    entry.innerHTML = ids.map((s) => `<option value="${esc(s)}"${s === cur ? " selected" : ""}>${esc(naamVanFase(s))}</option>`).join("");
   }
 }
 
-/** change-events op de dynamische fase-velden → dirty-check. */
-function koppelFaseEvents() {
-  const states = state.config?.states || [];
-  for (const st of states) {
-    for (const id of [
-      `media-${st.id}-0`, `media-${st.id}-1`, `media-${st.id}-wide`,
-      `adv-to-${st.id}`, `adv-rq-${st.id}`, `adv-cd-${st.id}`,
-      `adv-tsecs-${st.id}`, `adv-tto-${st.id}`,
-    ]) {
-      const el = $(id);
-      if (el) el.addEventListener("change", checkOpslaan);
+/* ---------- keten-schema (read-only visualisatie) ---------- */
+
+/**
+ * Keten-schema tekenen: chips in kaartvolgorde, direct gevolgd door de
+ * pijlen (—label→) van die fase. Pijlen verwijzen naar chips via
+ * data-van/data-naar; entry-chip gemarkeerd. Live bij elke wijziging.
+ */
+function tekenKetenSchema() {
+  const hold = $("keten-schema");
+  if (!hold) return;
+  const fases = leesFasesVanUi();
+  const entry = $("ph-entry")?.value || "";
+  hold.innerHTML = "";
+  if (!fases.length) {
+    hold.innerHTML = `<span class="hint">Geen fases.</span>`;
+    return;
+  }
+
+  const chips = new Map();   // id → element (voor pijl-ankers)
+  for (const st of fases) {
+    const chip = document.createElement("span");
+    chip.className = "keten-chip" + (st.id === entry ? " entry" : "");
+    chip.dataset.fase = st.id;
+    chip.title = `id: ${st.id}` + (st.id === entry ? " — startfase" : "");
+    chip.textContent = st.name || st.id;
+    hold.appendChild(chip);
+    chips.set(st.id, chip);
+
+    // pijlen van deze fase direct erachter (leesbaar als "A —beweging→ B")
+    const m = st.advance?.motion, t = st.advance?.timeout;
+    const pijlen = [];
+    if (m?.to && chips.has(m.to)) {
+      const lbl = "beweging" +
+        (m.require_motion_secs ? ` +${fmt(m.require_motion_secs, 1)} s` : "");
+      pijlen.push({ naar: m.to, lbl, soort: "motion" });
+      if (m.idle?.to && chips.has(m.idle.to)) {
+        pijlen.push({ naar: m.idle.to, lbl: "geen beweging", soort: "idle" });
+      }
+    }
+    if (t?.to && chips.has(t.to)) {
+      pijlen.push({ naar: t.to, lbl: `${fmt(t.secs, 1)} s`, soort: "timeout" });
+    }
+    for (const p of pijlen) {
+      const pijl = document.createElement("span");
+      pijl.className = `keten-pijl ${p.soort}`;
+      pijl.dataset.van = st.id;
+      pijl.dataset.naar = p.naar;
+      pijl.title = `${st.name || st.id} → ${naamVanFase(p.naar)} (${p.lbl})`;
+      pijl.textContent = `—${p.lbl}→`;
+      hold.appendChild(pijl);
     }
   }
+  const uitleg = document.createElement("span");
+  uitleg.className = "keten-uitleg hint";
+  uitleg.textContent = "—label→ = overgang vanaf de fase links ervan · gemarkeerd = startfase";
+  hold.appendChild(uitleg);
 }
 
 /* ============================================================
@@ -1267,8 +1815,20 @@ function koppelEvents() {
 
   // fases algemeen
   for (const id of ["ph-entry", "ph-kind", "tim-hold", "tim-still", "tim-cooldown", "tim-fps", "tim-conf"]) {
-    $(id).addEventListener("change", checkOpslaan);
+    $(id).addEventListener("change", () => { checkOpslaan(); tekenKetenSchema(); });
   }
+
+  // fase-werkbalk: nieuwe fase, layout, keten
+  $("fase-nieuw")?.addEventListener("click", nieuweFase);
+  $("fase-keten")?.addEventListener("click", verbindKeten);
+  for (const [modus, knopId] of [["verticaal", "fase-layout-verticaal"],
+                                 ["horizontaal", "fase-layout-horizontaal"]]) {
+    $(knopId)?.addEventListener("click", () => {
+      localStorage.setItem(FASE_LAYOUT_KEY, modus);
+      zetFaseLayout(modus);
+    });
+  }
+  zetFaseLayout(leesFaseLayout());
 
   // kind-mode via de statusbalk (direct API-call) en in het formulier
   $("sb-kind").addEventListener("change", () => wisselKindMode($("sb-kind").checked));
@@ -1282,6 +1842,7 @@ function koppelEvents() {
       const cfg = uiNaarConfig();
       await putConfig(cfg);
       state.config = cfg;
+      syncUiStates();           // niet-UI-velden (loop/bezel/effects) bijwerken
       zetDirty(false);
       toast("Configuratie opgeslagen");
     } catch (e) {

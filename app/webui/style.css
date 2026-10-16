@@ -577,6 +577,157 @@ table.lib td.hint { padding: 14px 10px; }
 }
 .fase-media-rij > .field.inline { flex: 1 1 220px; }
 
+/* ---------- fase-editor (onderdeel 2) ---------- */
+
+/* werkbalk boven de fasenlijst */
+.fase-werkbalk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 10px 16px;
+  margin: 0 0 14px;
+}
+.layout-groep { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.layout-groep .btn { border: none; border-radius: 0; }
+.layout-groep .btn + .btn { border-left: 1px solid var(--border); }
+.layout-groep .btn.active { background: var(--accent); color: #1d0f02; font-weight: 600; }
+
+/* states-lijst: kolom (verticaal) of rij (horizontaal, vaste kaartbreedte) */
+.states-grid { display: flex; flex-direction: column; gap: 14px; }
+.states-grid[data-layout="horizontaal"] {
+  flex-direction: row;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+}
+.states-grid[data-layout="horizontaal"] > .fase-kaart {
+  flex: 0 0 340px;
+  max-width: 340px;
+}
+
+/* kaart */
+.fase-kaart { transition: box-shadow .12s, opacity .12s; }
+.fase-kaart.sleep { opacity: .55; box-shadow: 0 0 0 2px var(--accent); cursor: grabbing; }
+.fase-kaart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fase-grip {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  color: var(--txt-dim);
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 2px;
+}
+.fase-grip:hover { color: var(--accent); }
+.fase-titel { display: flex; flex-direction: column; gap: 2px; min-width: 140px; flex: 1 1 140px; }
+input.fase-naam {
+  font-weight: 600;
+  font-size: 15px;
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+input.fase-naam:hover { border-color: var(--border); }
+input.fase-naam:focus { background: var(--bg2); border-color: var(--accent); outline: none; }
+.fase-id { color: var(--txt-dim); font-size: 11.5px; padding-left: 6px; }
+
+/* edge-regels (vertakkingen) */
+.edge-regels { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.edge-regel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 4px 6px;
+  border-radius: 8px;
+}
+.edge-regel.edge-uit .edge-label, .edge-regel.edge-uit select,
+.edge-regel.edge-uit input { opacity: .45; }
+.edge-label { color: var(--txt-dim); font-size: 13px; white-space: nowrap; }
+.edge-doel { max-width: 170px; }
+.edge-secs { width: 76px; }
+.edge-extra {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 2px 0 2px 26px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border);
+  border-radius: 0 8px 8px 0;
+}
+.edge-extra .field.inline { margin: 0; }
+.edge-subregel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  width: 100%;
+}
+.edge-subregel.uit { opacity: .45; }
+.edge-extra-knop.active { border-color: var(--accent); color: var(--accent); }
+
+/* drop-indicator tijdens het slepen */
+.fase-drop-lijn {
+  flex: 0 0 auto;
+  width: 100%;
+  height: 0;
+  border-top: 3px dashed var(--accent);
+  border-radius: 2px;
+  margin: -7px 0;               /* helft van de gap (14px) */
+}
+.states-grid[data-layout="horizontaal"] .fase-drop-lijn {
+  width: 0;
+  height: auto;
+  align-self: stretch;
+  border-top: none;
+  border-left: 3px dashed var(--accent);
+  margin: 0 -7px;
+}
+
+/* keten-schema */
+.keten-schema {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 4px;
+  min-height: 34px;
+}
+.keten-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.keten-chip.entry {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(255, 122, 26, .35);
+}
+.keten-pijl {
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--txt-dim);
+  padding: 1px 2px;
+}
+.keten-pijl.motion { color: var(--groen); }
+.keten-pijl.idle   { color: var(--accent2); }
+.keten-pijl.timeout { color: var(--txt-dim); }
+.keten-uitleg { margin-left: auto; }
+
+/* mobiel: werkbalk netter + horizontale modus blijft scrollbaar */
+@media (max-width: 700px) {
+  .fase-werkbalk { padding: 8px 10px; }
+  .states-grid[data-layout="horizontaal"] > .fase-kaart { flex-basis: 300px; max-width: 300px; }
+}
+
 /* ---------- mobiel ---------- */
 @media (max-width: 700px) {
   #statusbar { gap: 4px 12px; }

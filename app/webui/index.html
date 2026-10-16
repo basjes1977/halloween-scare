@@ -126,8 +126,25 @@
         </div>
       </fieldset>
 
+      <!-- fase-werkbalk: nieuwe fase, layout, keten -->
+      <div class="fase-werkbalk card">
+        <button type="button" class="btn btn-primary" id="fase-nieuw">+ Nieuwe fase</button>
+        <span class="layout-groep" role="group" aria-label="Lijstlayout">
+          <button type="button" class="btn btn-klein" id="fase-layout-verticaal" aria-pressed="true">Verticaal</button>
+          <button type="button" class="btn btn-klein" id="fase-layout-horizontaal" aria-pressed="false">Horizontaal</button>
+        </span>
+        <button type="button" class="btn" id="fase-keten" title="Herschrijf alle timeout-overgangen naar één keten langs de kaartvolgorde">🔗 Verbind als keten</button>
+        <span class="hint">Sleep de ⠿-greep om fases te herordenen (of Alt+pijl op een kaart).</span>
+      </div>
+
       <!-- per-fase kaarten worden door app.js gevuld -->
       <div class="states-grid" id="states-grid"></div>
+
+      <!-- automatische, read-only visualisatie van alle overgangen -->
+      <fieldset class="card" id="keten-card">
+        <legend>Keten-schema</legend>
+        <div id="keten-schema" class="keten-schema" aria-live="polite"></div>
+      </fieldset>
     </section>
 
     <!-- ============ TAB 3: BIBLIOTHEEK ============ -->

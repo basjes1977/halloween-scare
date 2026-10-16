@@ -37,6 +37,7 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
   const env = fs.existsSync(LIBS) ? { ...process.env, LD_LIBRARY_PATH: LIBS } : process.env;
   const browser = await chromium.launch({ env });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.on("dialog", (d) => d.accept().catch(() => {}));   // confirms altijd OK
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
 
@@ -158,6 +159,8 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       if (n !== 2) throw new Error(`vond ${n} blokken`);
     });
     await test("blok slepen naar links = horizontal+swap", async () => {
+      await page.locator("#wand-card").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(350);
       const blok = page.locator('.wand-blok[data-scherm="1"]');
       const box = await blok.boundingBox();
       const canvas = await page.locator("#wand-canvas").boundingBox();
@@ -170,9 +173,16 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       const status = await page.locator("#wand-status").textContent();
       if (!/links|swap|gespiegeld/i.test(status)) throw new Error("status: " + status);
     });
-    await test("layout wijziging maakt dirty", async () => {
+    await test("layout wijziging maakt dirty (via pijltjestoets, robuuster)", async () => {
+      // toetsenbord-route vermijdt sticky-overlay problemen van de muis-sleep
+      const blok = page.locator('.wand-blok[data-scherm="1"]');
+      await blok.focus();
+      await page.keyboard.press("ArrowLeft");   // scherm 2 naar links = swap
+      await page.waitForTimeout(300);
       if (await page.locator("#savebar").evaluate(e => e.hidden))
-        throw new Error("geen dirty na wand-sleep");
+        throw new Error("geen dirty na wand-toets");
+      const status = await page.locator("#wand-status").textContent();
+      if (!/links|gespiegeld/i.test(status)) throw new Error("status: " + status);
     });
     await test("opslaan persisteert layout", async () => {
       await page.waitForSelector("#btn-save:not([disabled])", { timeout: 4000 });
@@ -228,6 +238,100 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       throw new Error("klok tickte in geen enkele meting na visible");
     });
 
+
+    console.log("\n== 4d. fase-editor ==");
+    await page.click('[role="tab"][data-tab="phases"]');
+    await page.waitForTimeout(400);
+    let nieuweFaseId = null;
+    await test("nieuwe fase aanmaken + naam + vertakking + opslaan", async () => {
+      await page.locator("#states-grid .card").first().waitFor({ state: "visible", timeout: 8000 });
+      await page.click("#fase-nieuw");
+      await page.waitForTimeout(900);
+      const kaart = page.locator("#states-grid .card").last();
+      nieuweFaseId = await kaart.getAttribute("data-fase");
+      const naam = page.locator(`#fase-naam-${nieuweFaseId}`);
+      await naam.waitFor({ state: "visible" });
+      await naam.click();
+      await page.keyboard.press("Control+a");
+      await page.keyboard.type("Lokaas");
+      await page.evaluate((id) => {
+        const el = document.querySelector(`#adv-motion-aan-${id}`);
+        if (el && !el.checked) el.click();
+      }, nieuweFaseId);
+      await page.locator(`#edge-extra-${nieuweFaseId}`).waitFor({ state: "visible", timeout: 4000 });
+      await page.locator(`#adv-to-${nieuweFaseId}`).selectOption("langzaam");
+      await page.locator(`#adv-rq-${nieuweFaseId}`).fill("2.5");
+      await page.locator(`#adv-kindto-${nieuweFaseId}`).selectOption("kalm");
+      await page.locator(`#adv-idle-to-${nieuweFaseId}`).selectOption("rust");
+      await page.locator(`#adv-idle-secs-${nieuweFaseId}`).fill("7");
+      await page.waitForTimeout(400);
+      await page.waitForSelector("#btn-save:not([disabled])", { timeout: 6000 });
+      await page.click("#btn-save");
+      await page.waitForFunction(() => document.querySelector("#savebar")?.hidden === true, null, { timeout: 12000 });
+      const cfg = await api("/api/config");
+      const n = cfg.states.find(st => st.id === nieuweFaseId);
+      if (!n || n.name !== "Lokaas") throw new Error("naam niet opgeslagen");
+      const m = n.advance.motion;
+      if (!m || m.to !== "langzaam" || m.require_motion_secs !== 2.5
+          || m.kind_to !== "kalm" || m.idle?.to !== "rust" || m.idle?.still_secs !== 7)
+        throw new Error("motion incompleet: " + JSON.stringify(m));
+    });
+    await test("fase-editor: reorder via drag", async () => {
+      const kaarten = page.locator("#states-grid .card");
+      const bron = kaarten.nth(await kaarten.count() - 1);
+      await bron.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(350);
+      const gb = await bron.locator(".fase-grip").boundingBox();
+      const db = await kaarten.nth(0).boundingBox();
+      await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(db.x + 30, db.y + db.height / 2, { steps: 14 });
+      await page.mouse.up();
+      await page.waitForTimeout(500);
+      await page.waitForSelector("#btn-save:not([disabled])", { timeout: 6000 });
+      await page.click("#btn-save");
+      await page.waitForFunction(() => document.querySelector("#savebar")?.hidden === true, null, { timeout: 12000 });
+      const cfg = await api("/api/config");
+      if (cfg.states[0].id !== nieuweFaseId) throw new Error("volgorde: " + cfg.states.map(st => st.id).join(","));
+    });
+    await test("fase-editor: keten-knop herschrijft + entry=laatste", async () => {
+      await page.locator("#fase-keten").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(250);
+      await page.evaluate(() => document.querySelector("#fase-keten")?.click());
+      await page.waitForTimeout(700);
+      await page.waitForSelector("#btn-save:not([disabled])", { timeout: 6000 });
+      await page.click("#btn-save");
+      await page.waitForFunction(() => document.querySelector("#savebar")?.hidden === true, null, { timeout: 12000 });
+      const cfg = await api("/api/config");
+      const ids = cfg.states.map(st => st.id);
+      for (let i = 0; i < ids.length - 1; i++) {
+        if (cfg.states[i].advance?.timeout?.to !== ids[i + 1])
+          throw new Error(`keten broken bij ${ids[i]}`);
+      }
+      if (cfg.entry_state !== ids[ids.length - 1]) throw new Error("entry: " + cfg.entry_state);
+    });
+    await test("fase-editor: verwijderen + schema + horizontaal", async () => {
+      const kaarten = page.locator("#states-grid .card");
+      const laatste = kaarten.nth(await kaarten.count() - 1);
+      const id = await laatste.getAttribute("data-fase");
+      await laatste.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await page.evaluate((id) => {
+        document.querySelector(`[data-del-fase="${id}"]`)?.click();
+      }, id);
+      await page.waitForTimeout(700);
+      await page.waitForSelector("#btn-save:not([disabled])", { timeout: 6000 });
+      await page.click("#btn-save");
+      await page.waitForFunction(() => document.querySelector("#savebar")?.hidden === true, null, { timeout: 12000 });
+      const cfg = await api("/api/config");
+      if (cfg.states.some(st => st.id === id)) throw new Error("niet verwijderd");
+      const t = await page.locator("#keten-schema").textContent();
+      if (!/→/.test(t)) throw new Error("geen pijlen in schema");
+      await page.getByRole("button", { name: /Horizontaal/ }).click();
+      await page.waitForTimeout(400);
+      const attr = await page.locator("#states-grid").evaluate(e => e.dataset.layout || e.className);
+      if (!/horizont/i.test(String(attr))) throw new Error("layout: " + attr);
+    });
     console.log("\n== 5. mobiele viewport (390×844, echte Pi) ==");
     const mob = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await mob.goto(BASE + "/", { waitUntil: "networkidle" });

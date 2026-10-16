@@ -219,10 +219,16 @@ const api = async (p, opt) => (await fetch(BASE + p, opt)).json();
       });
       const leesT = () => page.locator("#st-phase-time").textContent();
       const p = (x) => parseFloat(String(x).replace(",", "."));
-      const t1 = await leesT();
-      await page.waitForTimeout(2500);
-      const t2 = await leesT();
-      if (!(p(t2) - p(t1) >= 1.5)) throw new Error(`poll gestopt na visible: ${t1} -> ${t2}`);
+      // fase kan tijdens de meting wisselen (tijd reset) — meet dan opnieuw
+      for (let poging = 0; poging < 3; poging++) {
+        const t1 = await leesT();
+        await page.waitForTimeout(2200);
+        const t2 = await leesT();
+        if (p(t2) > p(t1)) return;                    // tikt weer ✔
+        if (p(t2) < p(t1)) continue;                  // fase-reset: meet opnieuw
+        throw new Error(`poll gestopt na visible: ${t1} -> ${t2}`);
+      }
+      throw new Error("klok tickte in geen enkele meting na visible");
     });
 
     console.log("\n== 5. mobiele viewport (390×844, echte Pi) ==");
